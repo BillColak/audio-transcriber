@@ -5,10 +5,9 @@ A private, local web app for turning long recordings into editable timestamped t
 ## Setup
 
 1. Install [Node.js 22 or newer](https://nodejs.org/).
-2. Copy `.env.example` to `.env`.
-3. Add your OpenAI API key to `.env`. The key stays in the local server and is never sent to the browser.
-4. Run `npm install` and then `npm run dev`.
-5. Open `http://127.0.0.1:5173`.
+2. Create a `.env` file in the project root with `OPENAI_API_KEY=your-key`. The key stays in the local server and is never sent to the browser.
+3. Run `npm install` and then `npm run dev`.
+4. Open `http://127.0.0.1:5173`.
 
 For a production-style local run, use `npm run build`, set `NODE_ENV=production`, run `npm start`, and open `http://127.0.0.1:8787`.
 
