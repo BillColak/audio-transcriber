@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently \"vite\" \"tsx watch server/index.ts\"",
     "build": "tsc -b && vite build",
-    "start": "tsx server/index.ts",
+    "start": "cross-env NODE_ENV=production tsx server/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint ."
@@ -35,6 +35,7 @@
     "@types/react-dom": "latest",
     "@types/supertest": "latest",
     "concurrently": "latest",
+    "cross-env": "^10.1.0",
     "eslint": "latest",
     "eslint-plugin-react-hooks": "latest",
     "eslint-plugin-react-refresh": "latest",
