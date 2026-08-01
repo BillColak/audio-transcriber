@@ -29,3 +29,11 @@ export interface Transcript {
 export interface ChunkTranscription {
   text: string;
 }
+
+/** Everything the settings screen needs. Deliberately never includes the key itself. */
+export interface SettingsSnapshot {
+  hasApiKey: boolean;
+  keySource: 'settings' | 'environment' | null;
+  transcribeModel: string;
+  summaryModel: string;
+}

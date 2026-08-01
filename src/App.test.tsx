@@ -11,12 +11,28 @@ const saved = {
   summarize: false, summary: null, summaryError: null,
 };
 
-function mockHistory(...items: unknown[]) {
-  return vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(items), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+const configured = { hasApiKey: true, keySource: 'settings', transcribeModel: 'gpt-transcribe', summaryModel: 'gpt-5-mini' };
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+interface ApiMock { history?: unknown[]; settings?: unknown; onPut?: (body: string) => Response }
+
+/** The app calls both /api/transcriptions and /api/settings, so the mock has to route. */
+function mockApi({ history = [], settings = configured, onPut }: ApiMock = {}) {
+  const put = onPut ?? (() => json(settings));
+  return vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+    const url = String(input);
+    if (url.endsWith('/api/settings')) {
+      return Promise.resolve(init?.method === 'PUT' ? put(String(init.body)) : json(settings));
+    }
+    return Promise.resolve(json(history));
+  });
 }
 
 it('offers Indonesian upload and renders a saved timestamped transcript', async () => {
-  mockHistory(saved);
+  mockApi({ history: [saved] });
 
   render(<App />);
 
@@ -29,7 +45,7 @@ it('offers Indonesian upload and renders a saved timestamped transcript', async 
 });
 
 it('offers a summarise toggle beside the transcribe button', async () => {
-  mockHistory();
+  mockApi();
 
   render(<App />);
 
@@ -40,7 +56,7 @@ it('offers a summarise toggle beside the transcribe button', async () => {
 });
 
 it('shows the generated summary with a copy affordance', async () => {
-  mockHistory({ ...saved, summarize: true, summary: '## Summary\nSemua berjalan baik.' });
+  mockApi({ history: [{ ...saved, summarize: true, summary: '## Summary\nSemua berjalan baik.' }] });
 
   render(<App />);
 
@@ -52,11 +68,41 @@ it('shows the generated summary with a copy affordance', async () => {
 });
 
 it('surfaces a failed summary without hiding the transcript', async () => {
-  mockHistory({ ...saved, summarize: true, summaryError: 'The transcript is complete, but the summary failed: rate limited' });
+  mockApi({ history: [{ ...saved, summarize: true, summaryError: 'The transcript is complete, but the summary failed: rate limited' }] });
 
   render(<App />);
 
   fireEvent.click(await screen.findByRole('button', { name: /Rapat/ }));
   await waitFor(() => expect(screen.getByDisplayValue('Selamat pagi')).toBeInTheDocument());
   expect(screen.getByText(/the summary failed: rate limited/)).toBeInTheDocument();
+});
+
+it('asks for an API key on first run instead of showing the upload form', async () => {
+  const unconfigured = { hasApiKey: false, keySource: null, transcribeModel: 'gpt-transcribe', summaryModel: 'gpt-5-mini' };
+  const put = vi.fn(() => json(configured));
+  mockApi({ settings: unconfigured, onPut: put });
+
+  render(<App />);
+
+  expect(await screen.findByRole('heading', { name: 'Add your OpenAI key' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Transcribe audio/ })).not.toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText(/OpenAI API key/), { target: { value: 'sk-pasted-into-the-app-5678' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save key' }));
+
+  await waitFor(() => expect(screen.getByRole('button', { name: /Transcribe audio/ })).toBeInTheDocument());
+  expect(put).toHaveBeenCalledWith(JSON.stringify({ apiKey: 'sk-pasted-into-the-app-5678' }));
+  expect(screen.queryByRole('heading', { name: 'Add your OpenAI key' })).not.toBeInTheDocument();
+});
+
+it('lets a configured user reopen settings to replace the key', async () => {
+  mockApi();
+
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+  expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+  expect(screen.getByText(/gpt-transcribe/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  expect(screen.queryByRole('heading', { name: 'Settings' })).not.toBeInTheDocument();
 });

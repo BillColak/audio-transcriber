@@ -14,6 +14,9 @@ interface Transcript {
 const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 const apiBase = inTauri ? 'http://127.0.0.1:8787' : '';
 const api = `${apiBase}/api/transcriptions`;
+const settingsApi = `${apiBase}/api/settings`;
+
+interface Settings { hasApiKey: boolean; keySource: 'settings' | 'environment' | null; transcribeModel: string; summaryModel: string }
 
 export default function App() {
   const [history, setHistory] = useState<Transcript[]>([]);
@@ -25,6 +28,10 @@ export default function App() {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [message, setMessage] = useState('');
   const [dragging, setDragging] = useState(false);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [apiKeyDraft, setApiKeyDraft] = useState('');
+  const [savingKey, setSavingKey] = useState(false);
   const requestRef = useRef<XMLHttpRequest | null>(null);
 
   const loadHistory = async (quiet = false) => {
@@ -36,6 +43,13 @@ export default function App() {
     } catch { if (!quiet) setMessage('Could not reach the local transcription server.'); return false; }
   };
 
+  const loadSettings = async () => {
+    try {
+      const response = await fetch(settingsApi); if (!response.ok) throw new Error();
+      setSettings(await response.json() as Settings);
+    } catch { /* the history poll below already reports an unreachable backend */ }
+  };
+
   // The packaged app starts its backend as a child process, so the first few polls can miss.
   useEffect(() => {
     let stopped = false; let attempts = 0;
@@ -43,11 +57,23 @@ export default function App() {
       if (stopped) return;
       attempts += 1;
       const reached = await loadHistory(attempts < 15);
-      if (!reached && !stopped && attempts < 15) window.setTimeout(() => void attempt(), 700);
+      if (reached) { void loadSettings(); return; }
+      if (!stopped && attempts < 15) window.setTimeout(() => void attempt(), 700);
     };
     void attempt();
     return () => { stopped = true; };
   }, []);
+
+  const saveApiKey = async () => {
+    setSavingKey(true);
+    try {
+      const response = await fetch(settingsApi, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: apiKeyDraft }) });
+      const body = await response.json() as Settings & { error?: string };
+      if (!response.ok) { setMessage(body.error ?? 'Could not save the API key.'); return; }
+      setSettings(body); setApiKeyDraft(''); setSettingsOpen(false); setMessage('API key saved.');
+    } catch { setMessage('Could not reach the local transcription server.'); }
+    finally { setSavingKey(false); }
+  };
   useEffect(() => {
     if (!history.some((item) => item.status === 'queued' || item.status === 'processing')) return;
     const timer = window.setInterval(() => void loadHistory(), 1500); return () => window.clearInterval(timer);
@@ -82,11 +108,31 @@ export default function App() {
   const copyAll = async () => { if (selected) { await navigator.clipboard.writeText(selected.segments.map((s) => s.text).join(' ')); setMessage('Transcript copied.'); } };
   const copySummary = async () => { if (selected?.summary) { await navigator.clipboard.writeText(selected.summary); setMessage('Summary copied.'); } };
   const active = useMemo(() => history.filter((item) => item.status === 'queued' || item.status === 'processing'), [history]);
+  const needsKey = settings !== null && !settings.hasApiKey;
 
   return <div className="app-shell">
-    <header className="hero"><div className="brand-mark" aria-hidden="true">⌁</div><div><p className="eyebrow">PRIVATE · LOCAL · TIMESTAMPED</p><h1>Audio to text,<br/><span>without the clutter.</span></h1><p className="intro">Drop in a recording. Get a clean, editable transcript with precise timestamps—kept in your own local history.</p></div></header>
+    <header className="hero"><div className="brand-mark" aria-hidden="true">⌁</div><div><p className="eyebrow">PRIVATE · LOCAL · TIMESTAMPED</p><h1>Audio to text,<br/><span>without the clutter.</span></h1><p className="intro">Drop in a recording. Get a clean, editable transcript with precise timestamps—kept in your own local history.</p></div>
+      {settings && !needsKey && <button className="settings-button" onClick={() => setSettingsOpen((open) => !open)} aria-expanded={settingsOpen}>Settings</button>}</header>
     <main>
-      <section className="upload-card" aria-labelledby="upload-title">
+      {(needsKey || settingsOpen) && <section className="setup-card" aria-labelledby="setup-title">
+        <div><p className="section-number">00</p><h2 id="setup-title">{needsKey ? 'Add your OpenAI key' : 'Settings'}</h2></div>
+        <div className="setup-body">
+          <p>{needsKey
+            ? 'Audio Transcriber sends audio chunks to OpenAI to transcribe them. Paste an API key to get started — it is saved on this computer only, never uploaded anywhere else.'
+            : 'Your key is saved on this computer only. Pasting a new one replaces it.'}</p>
+          <label htmlFor="api-key">OpenAI API key
+            <input id="api-key" type="password" autoComplete="off" spellCheck={false} placeholder="sk-…" value={apiKeyDraft} onChange={(e) => setApiKeyDraft(e.target.value)}/>
+          </label>
+          <div className="setup-actions">
+            <button className="primary" onClick={() => void saveApiKey()} disabled={savingKey || !apiKeyDraft.trim()}>{savingKey ? 'Saving…' : 'Save key'}</button>
+            {!needsKey && <button className="text-button" onClick={() => { setSettingsOpen(false); setApiKeyDraft(''); }}>Close</button>}
+          </div>
+          {needsKey && message && <p className="notice" role="status">{message}</p>}
+          {settings && <p className="setup-meta">Transcription · {settings.transcribeModel} — Summaries · {settings.summaryModel}{settings.keySource === 'environment' ? ' — currently using the key from .env' : ''}</p>}
+        </div>
+      </section>}
+
+      {!needsKey && <section className="upload-card" aria-labelledby="upload-title">
         <div><p className="section-number">01</p><h2 id="upload-title">New transcription</h2></div>
         <label className={`drop-zone ${dragging ? 'dragging' : ''}`} onDragOver={(e) => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(e) => { e.preventDefault(); setDragging(false); chooseFile(e.dataTransfer.files[0]); }}>
           <input type="file" accept=".flac,.mp3,.mp4,.mpeg,.mpga,.m4a,.ogg,.wav,.webm" onChange={(e) => chooseFile(e.target.files?.[0])}/>
@@ -99,9 +145,9 @@ export default function App() {
           </div></div>
         {uploadProgress !== null && <div className="progress-wrap"><progress value={uploadProgress} max="100"/><span>{uploadProgress}% uploaded</span><button className="text-button" onClick={() => requestRef.current?.abort()}>Cancel</button></div>}
         {message && <p className="notice" role="status">{message}</p>}
-      </section>
+      </section>}
 
-      {active.length > 0 && <section className="active-jobs"><p className="section-number">02</p><h2>In progress</h2>{active.map((item) => <article key={item.id}><div><strong>{item.title}</strong><span>{item.status === 'queued' ? 'Waiting in queue' : 'Transcribing and timestamping'}</span></div><progress value={item.progress} max="100"/><b>{item.progress}%</b><button onClick={() => void remove(item)}>Cancel</button></article>)}</section>}
+      {active.length > 0 &&<section className="active-jobs"><p className="section-number">02</p><h2>In progress</h2>{active.map((item) => <article key={item.id}><div><strong>{item.title}</strong><span>{item.status === 'queued' ? 'Waiting in queue' : 'Transcribing and timestamping'}</span></div><progress value={item.progress} max="100"/><b>{item.progress}%</b><button onClick={() => void remove(item)}>Cancel</button></article>)}</section>}
 
       <section className="workspace">
         <aside><div className="history-heading"><div><p className="section-number">{active.length ? '03' : '02'}</p><h2>History</h2></div><span>{history.length}</span></div>

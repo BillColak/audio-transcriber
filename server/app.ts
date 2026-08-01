@@ -7,11 +7,18 @@ import multer from 'multer';
 import { MAX_UPLOAD_BYTES, validateAudioFile } from './domain.js';
 import { toMarkdown, toText, toVtt } from './exports.js';
 import type { TranscriptStore } from './store.js';
-import type { LanguagePreference, Segment, Transcript } from './types.js';
+import type { LanguagePreference, Segment, SettingsSnapshot, Transcript } from './types.js';
+
+/** The slice of `SettingsStore` the HTTP layer is allowed to see. */
+export interface SettingsPort {
+  snapshot(): SettingsSnapshot;
+  setApiKey(key: string): Promise<void>;
+}
 
 interface AppOptions {
   store: TranscriptStore;
   uploadDirectory: string;
+  settings: SettingsPort;
   enqueue(id: string, uploadPath: string): void;
   cancel(id: string): boolean;
 }
@@ -25,6 +32,16 @@ export function createApp(options: AppOptions) {
   const upload = multer({ dest: options.uploadDirectory, limits: { fileSize: MAX_UPLOAD_BYTES } });
 
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
+  app.get('/api/settings', (_req, res) => res.json(options.settings.snapshot()));
+  app.put('/api/settings', async (req, res) => {
+    const apiKey = typeof req.body?.apiKey === 'string' ? req.body.apiKey : '';
+    try {
+      await options.settings.setApiKey(apiKey);
+    } catch (error) {
+      return res.status(400).json({ error: error instanceof Error ? error.message : 'Could not save the API key.' });
+    }
+    res.json(options.settings.snapshot());
+  });
   app.get('/api/transcriptions', async (_req, res) => res.json(await options.store.list()));
   app.get('/api/transcriptions/:id', async (req, res) => {
     const transcript = await options.store.get(req.params.id);
