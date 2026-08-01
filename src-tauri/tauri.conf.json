@@ -40,6 +40,11 @@
     ],
     "externalBin": ["binaries/server"],
     "resources": ["resources/*"],
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine"
+      }
+    },
     "macOS": {
       "minimumSystemVersion": "10.15"
     }
