@@ -18,7 +18,9 @@ interface AppOptions {
 
 export function createApp(options: AppOptions) {
   const app = express();
-  app.use(cors({ origin: /^http:\/\/127\.0\.0\.1(?::\d+)?$/ }));
+  // Browsers reach the API from the Vite dev server; the packaged app reaches it from the
+  // Tauri webview, whose origin differs per platform.
+  app.use(cors({ origin: [/^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/, 'tauri://localhost', 'https://tauri.localhost', 'http://tauri.localhost'] }));
   app.use(express.json({ limit: '2mb' }));
   const upload = multer({ dest: options.uploadDirectory, limits: { fileSize: MAX_UPLOAD_BYTES } });
 

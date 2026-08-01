@@ -1,11 +1,12 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { mkdir } from 'node:fs/promises';
 import dotenv from 'dotenv';
 import express from 'express';
 import { createApp } from './app.js';
 import { FfmpegMedia } from './media.js';
+import { appDataDirectory } from './paths.js';
 import { DEFAULT_SUMMARY_MODEL, OpenAISummarizer } from './openai-summarizer.js';
 import { DEFAULT_TRANSCRIBE_MODEL, OpenAITranscriber } from './openai-transcriber.js';
 import { JobProcessor } from './processor.js';
@@ -14,8 +15,8 @@ import { TranscriptStore } from './store.js';
 
 dotenv.config();
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const appData = process.env.APPDATA ?? path.join(homedir(), '.audio-transcriber');
-const dataDirectory = path.join(appData, 'Audio Transcriber', 'transcripts');
+const appData = appDataDirectory();
+const dataDirectory = path.join(appData, 'transcripts');
 const workDirectory = path.join(tmpdir(), 'audio-transcriber');
 const uploadDirectory = path.join(workDirectory, 'uploads');
 await Promise.all([mkdir(dataDirectory, { recursive: true }), mkdir(uploadDirectory, { recursive: true })]);

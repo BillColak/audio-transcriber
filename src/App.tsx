@@ -9,7 +9,11 @@ interface Transcript {
   summarize: boolean; summary: string | null; summaryError: string | null;
 }
 
-const api = '/api/transcriptions';
+// In a browser the Vite dev server (or Express itself) proxies `/api`. Inside the Tauri webview the
+// origin is `tauri://localhost`, so the backend has to be addressed absolutely.
+const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+const apiBase = inTauri ? 'http://127.0.0.1:8787' : '';
+const api = `${apiBase}/api/transcriptions`;
 
 export default function App() {
   const [history, setHistory] = useState<Transcript[]>([]);
@@ -23,15 +27,27 @@ export default function App() {
   const [dragging, setDragging] = useState(false);
   const requestRef = useRef<XMLHttpRequest | null>(null);
 
-  const loadHistory = async () => {
+  const loadHistory = async (quiet = false) => {
     try {
       const response = await fetch(api); if (!response.ok) throw new Error();
       const items = await response.json() as Transcript[]; setHistory(items);
       setSelected((current) => current ? items.find((item) => item.id === current.id) ?? current : current);
-    } catch { setMessage('Could not reach the local transcription server.'); }
+      return true;
+    } catch { if (!quiet) setMessage('Could not reach the local transcription server.'); return false; }
   };
 
-  useEffect(() => { const timer = window.setTimeout(() => void loadHistory(), 0); return () => window.clearTimeout(timer); }, []);
+  // The packaged app starts its backend as a child process, so the first few polls can miss.
+  useEffect(() => {
+    let stopped = false; let attempts = 0;
+    const attempt = async () => {
+      if (stopped) return;
+      attempts += 1;
+      const reached = await loadHistory(attempts < 15);
+      if (!reached && !stopped && attempts < 15) window.setTimeout(() => void attempt(), 700);
+    };
+    void attempt();
+    return () => { stopped = true; };
+  }, []);
   useEffect(() => {
     if (!history.some((item) => item.status === 'queued' || item.status === 'processing')) return;
     const timer = window.setInterval(() => void loadHistory(), 1500); return () => window.clearInterval(timer);
