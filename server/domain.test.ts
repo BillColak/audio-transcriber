@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { formatTimestamp, languageCode, mergeChunkSegments, validateAudioFile } from './domain.js';
-import { toText, toVtt } from './exports.js';
+import { chunkSegment, formatTimestamp, joinSegments, languageCodes, validateAudioFile } from './domain.js';
+import { toMarkdown, toText, toVtt } from './exports.js';
 
 describe('audio validation', () => {
   it('accepts supported audio and rejects unsupported extensions', () => {
@@ -14,17 +14,25 @@ describe('audio validation', () => {
 });
 
 describe('language support', () => {
-  it('maps Indonesian to its ISO-639-1 code and allows auto detection', () => {
-    expect(languageCode('indonesian')).toBe('id');
-    expect(languageCode('auto')).toBeUndefined();
+  it('maps Indonesian to a one-element language array and allows auto detection', () => {
+    expect(languageCodes('indonesian')).toEqual(['id']);
+    expect(languageCodes('auto')).toBeUndefined();
   });
 });
 
 describe('timestamped transcripts', () => {
-  it('offsets segments from later chunks', () => {
-    expect(mergeChunkSegments([{ start: 1, end: 3, text: 'Halo' }], 1200, 2)).toEqual([
-      { id: '2-0', startSeconds: 1201, endSeconds: 1203, text: 'Halo' },
-    ]);
+  it('turns a chunk transcript into one segment spanning the chunk', () => {
+    expect(chunkSegment('  Halo dunia  ', 1200, 300, 2)).toEqual({
+      id: '2-0', startSeconds: 1200, endSeconds: 1500, text: 'Halo dunia',
+    });
+  });
+
+  it('joins segments into a single body of text for summarising', () => {
+    expect(joinSegments([
+      { id: '0-0', startSeconds: 0, endSeconds: 1, text: 'Halo' },
+      { id: '1-0', startSeconds: 1, endSeconds: 2, text: '  ' },
+      { id: '2-0', startSeconds: 2, endSeconds: 3, text: 'dunia' },
+    ])).toBe('Halo\n\ndunia');
   });
 
   it('formats text and valid WebVTT', () => {
@@ -32,5 +40,9 @@ describe('timestamped transcripts', () => {
     expect(formatTimestamp(3661.25)).toBe('01:01:01.250');
     expect(toText(segments)).toBe('[00:00:01] Selamat pagi.');
     expect(toVtt(segments)).toContain('00:00:01.250 --> 00:00:03.500\nSelamat pagi.');
+  });
+
+  it('exports a summary as Markdown', () => {
+    expect(toMarkdown({ title: 'Rapat', summary: '## Summary\nSemua baik.' } as never)).toBe('# Rapat\n\n## Summary\nSemua baik.\n');
   });
 });

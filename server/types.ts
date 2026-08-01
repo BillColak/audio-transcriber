@@ -20,10 +20,12 @@ export interface Transcript {
   durationSeconds: number;
   segments: Segment[];
   error: string | null;
+  summarize: boolean;
+  summary: string | null;
+  summaryError: string | null;
 }
 
-export interface RawSegment {
-  start: number;
-  end: number;
+/** What a transcription model returns for one prepared chunk. `gpt-transcribe` has no sub-segment timings. */
+export interface ChunkTranscription {
   text: string;
 }

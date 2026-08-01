@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { LanguagePreference, RawSegment, Segment } from './types.js';
+import type { LanguagePreference, Segment } from './types.js';
 
 const supportedExtensions = new Set(['.flac', '.mp3', '.mp4', '.mpeg', '.mpga', '.m4a', '.ogg', '.wav', '.webm']);
 export const MAX_UPLOAD_BYTES = 2 * 1024 ** 3;
@@ -11,17 +11,23 @@ export function validateAudioFile(filename: string, size: number): { ok: true } 
   return { ok: true };
 }
 
-export function languageCode(language: LanguagePreference): string | undefined {
-  return language === 'indonesian' ? 'id' : undefined;
+/** `gpt-transcribe` takes a `languages` array; auto-detect means sending nothing at all. */
+export function languageCodes(language: LanguagePreference): string[] | undefined {
+  return language === 'indonesian' ? ['id'] : undefined;
 }
 
-export function mergeChunkSegments(raw: RawSegment[], offsetSeconds: number, chunkIndex: number): Segment[] {
-  return raw.map((segment, index) => ({
-    id: `${chunkIndex}-${index}`,
-    startSeconds: offsetSeconds + segment.start,
-    endSeconds: offsetSeconds + segment.end,
-    text: segment.text.trim(),
-  }));
+/** One segment per prepared chunk — the model returns no sub-segment timings, so the chunk is the unit. */
+export function chunkSegment(text: string, offsetSeconds: number, durationSeconds: number, chunkIndex: number): Segment {
+  return {
+    id: `${chunkIndex}-0`,
+    startSeconds: offsetSeconds,
+    endSeconds: offsetSeconds + durationSeconds,
+    text: text.trim(),
+  };
+}
+
+export function joinSegments(segments: Segment[]): string {
+  return segments.map((segment) => segment.text.trim()).filter(Boolean).join('\n\n');
 }
 
 export function formatTimestamp(seconds: number, milliseconds = true): string {

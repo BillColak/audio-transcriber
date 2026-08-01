@@ -5,7 +5,7 @@ import cors from 'cors';
 import express from 'express';
 import multer from 'multer';
 import { MAX_UPLOAD_BYTES, validateAudioFile } from './domain.js';
-import { toText, toVtt } from './exports.js';
+import { toMarkdown, toText, toVtt } from './exports.js';
 import type { TranscriptStore } from './store.js';
 import type { LanguagePreference, Segment, Transcript } from './types.js';
 
@@ -42,6 +42,7 @@ export function createApp(options: AppOptions) {
       id: randomUUID(), title: path.parse(req.file.originalname).name, sourceName: req.file.originalname,
       language: language as LanguagePreference, status: 'queued', progress: 0, createdAt: now, updatedAt: now,
       durationSeconds: 0, segments: [], error: null,
+      summarize: req.body.summarize === 'true' || req.body.summarize === true, summary: null, summaryError: null,
     };
     await options.store.save(transcript);
     options.enqueue(transcript.id, req.file.path);
@@ -65,9 +66,13 @@ export function createApp(options: AppOptions) {
   app.get('/api/transcriptions/:id/download', async (req, res) => {
     const transcript = await options.store.get(req.params.id);
     if (!transcript) return res.status(404).json({ error: 'Transcript not found.' });
-    const format = req.query.format === 'vtt' ? 'vtt' : req.query.format === 'txt' ? 'txt' : null;
-    if (!format) return res.status(400).json({ error: 'Format must be txt or vtt.' });
-    res.type(format === 'vtt' ? 'text/vtt' : 'text/plain').attachment(`${safeFilename(transcript.title)}.${format}`).send(format === 'vtt' ? toVtt(transcript.segments) : toText(transcript.segments));
+    const requested = String(req.query.format ?? '');
+    const format = requested === 'vtt' || requested === 'txt' || requested === 'md' ? requested : null;
+    if (!format) return res.status(400).json({ error: 'Format must be txt, vtt, or md.' });
+    if (format === 'md' && !transcript.summary) return res.status(404).json({ error: 'This transcript has no summary.' });
+    const body = format === 'vtt' ? toVtt(transcript.segments) : format === 'md' ? toMarkdown(transcript) : toText(transcript.segments);
+    const type = format === 'vtt' ? 'text/vtt' : format === 'md' ? 'text/markdown' : 'text/plain';
+    res.type(type).attachment(`${safeFilename(transcript.title)}.${format}`).send(body);
   });
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     void _next;
