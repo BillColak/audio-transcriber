@@ -48,6 +48,16 @@ fn spawn_backend(app: &AppHandle) -> Result<CommandChild, Box<dyn std::error::Er
         ffmpeg.to_string_lossy().to_string(),
     );
 
+    // Baked in by scripts/prepare-sidecar.mjs from the build machine's .env, so this private,
+    // never-publicly-distributed build never shows the in-app "add your key" screen.
+    let api_key_file = root.join("api-key.txt");
+    if let Ok(key) = std::fs::read_to_string(&api_key_file) {
+        let trimmed = key.trim();
+        if !trimmed.is_empty() {
+            env.insert("OPENAI_API_KEY".to_string(), trimmed.to_string());
+        }
+    }
+
     let (mut events, child) = app
         .shell()
         .sidecar("server")?

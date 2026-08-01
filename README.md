@@ -6,9 +6,11 @@ It ships two ways: as a **desktop app** (Windows and macOS, built with Tauri) an
 
 ## Installing the desktop app
 
-Download the installer for your platform from the [Releases page](https://github.com/BillColak/audio-transcriber/releases), run it, and launch Audio Transcriber from the Start Menu or Applications folder. On first run the app asks for an OpenAI API key; paste one and it is saved on that computer only. There is nothing else to install — Node.js and FFmpeg are bundled.
+Download the installer for your platform from the [Releases page](https://github.com/BillColak/audio-transcriber/releases), run it, and launch Audio Transcriber from the Start Menu or Applications folder. There is nothing else to install — Node.js and FFmpeg are bundled.
 
-Use the **Settings** button in the top right to replace the key later.
+> **This is a private build, never distributed publicly.** `scripts/prepare-sidecar.mjs` bakes the build machine's own `OPENAI_API_KEY` (from its `.env`) into the packaged app, so a fresh install never shows the "add your key" screen — it just works on any machine the developer installs it on. If this project is ever going to be shared with anyone else, remove that step and rely on the in-app Settings screen (still there, still functional) instead.
+
+Use the **Settings** button in the top right to replace the key later, or to check which key/model is currently active.
 
 > The macOS build is unsigned, so Gatekeeper quarantines it on first launch. Right-click the app and choose **Open**, or run `xattr -dr com.apple.quarantine "/Applications/Audio Transcriber.app"`.
 
