@@ -1,0 +1,77 @@
+name: Release
+
+# Push a tag to cut a release, or run this by hand from the Actions tab to get
+# installers without publishing anything.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  installers:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            label: Windows (x64)
+          - runner: macos-latest
+            label: macOS (Apple Silicon)
+          # Intel Macs need their own native runner — see the note below before adding one.
+
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check
+        run: |
+          npm run lint
+          npm test
+
+      # Never pass `--target` here. `scripts/prepare-sidecar.mjs` ships the runner's own Node
+      # binary as the sidecar and names it from `rustc -vV`'s host triple, so a cross-compile
+      # would bundle the wrong architecture under the wrong filename. Build natively, and add a
+      # matrix entry on a matching runner for any architecture you want to support.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}-{1}', github.run_number, github.sha) }}
+          releaseName: Audio Transcriber ${{ github.ref_type == 'tag' && github.ref_name || github.run_number }}
+          releaseBody: |
+            Install and launch Audio Transcriber, then paste an OpenAI API key when it asks.
+
+            The macOS build is unsigned. Gatekeeper will quarantine it on first launch:
+            right-click the app and choose Open, or run
+            `xattr -dr com.apple.quarantine "/Applications/Audio Transcriber.app"`.
+          releaseDraft: true
+          prerelease: false
+
+      - name: Upload installers as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ runner.os }}
+          if-no-files-found: warn
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/dmg/*.dmg
