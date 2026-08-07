@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -33,6 +33,22 @@ fn resource_root(app: &AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>>
     })
 }
 
+/// On Windows `resource_dir()` can return a verbatim path (`\\?\C:\...`). Node cannot resolve a
+/// main module through that prefix: it dies with `EISDIR: illegal operation on a directory,
+/// lstat 'C:'` before the script runs at all. Rust's own fs calls are happy either way, so the
+/// prefix is only stripped on the way out to the sidecar.
+fn plain(path: &Path) -> String {
+    let text = path.to_string_lossy().into_owned();
+    #[cfg(windows)]
+    // `\\?\UNC\server\share` has no plain drive-letter form, so leave that shape alone.
+    if let Some(rest) = text.strip_prefix(r"\\?\") {
+        if !rest.starts_with("UNC\\") {
+            return rest.to_string();
+        }
+    }
+    text
+}
+
 /// The sidecar binary is a plain Node runtime, so the backend is handed to it as a script argument.
 fn spawn_backend(app: &AppHandle) -> Result<CommandChild, Box<dyn std::error::Error>> {
     let root = resource_root(app)?;
@@ -43,10 +59,7 @@ fn spawn_backend(app: &AppHandle) -> Result<CommandChild, Box<dyn std::error::Er
     let ffmpeg = root.join(if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" });
 
     let mut env = HashMap::new();
-    env.insert(
-        "AUDIO_TRANSCRIBER_FFMPEG".to_string(),
-        ffmpeg.to_string_lossy().to_string(),
-    );
+    env.insert("AUDIO_TRANSCRIBER_FFMPEG".to_string(), plain(&ffmpeg));
 
     // Baked in by scripts/prepare-sidecar.mjs from the build machine's .env, so this private,
     // never-publicly-distributed build never shows the in-app "add your key" screen.
@@ -61,7 +74,7 @@ fn spawn_backend(app: &AppHandle) -> Result<CommandChild, Box<dyn std::error::Er
     let (mut events, child) = app
         .shell()
         .sidecar("server")?
-        .args([script.to_string_lossy().to_string()])
+        .args([plain(&script)])
         .envs(env)
         .spawn()?;
 
@@ -119,4 +132,28 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::plain;
+    use std::path::Path;
+
+    const SCRIPT: &str = r"C:\Program Files\Audio Transcriber\resources\server.mjs";
+
+    #[test]
+    fn strips_the_verbatim_prefix_that_node_cannot_resolve() {
+        assert_eq!(plain(Path::new(&format!(r"\\?\{SCRIPT}"))), SCRIPT);
+    }
+
+    #[test]
+    fn leaves_an_ordinary_drive_path_alone() {
+        assert_eq!(plain(Path::new(SCRIPT)), SCRIPT);
+    }
+
+    #[test]
+    fn keeps_verbatim_unc_paths_intact() {
+        let unc = r"\\?\UNC\host\share\server.mjs";
+        assert_eq!(plain(Path::new(unc)), unc);
+    }
 }
