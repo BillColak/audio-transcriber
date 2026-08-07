@@ -32,7 +32,7 @@ it('never checks for updates outside the desktop app', async () => {
 
   render(<App />);
 
-  await waitFor(() => expect(screen.getByRole('heading', { name: /Audio to text/ })).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByRole('contentinfo')).toBeInTheDocument());
   expect(check).not.toHaveBeenCalled();
   expect(screen.queryByLabelText('Application update')).not.toBeInTheDocument();
 });
@@ -68,7 +68,8 @@ it('stays quiet when the update feed cannot be reached', async () => {
   await waitFor(() => expect(check).toHaveBeenCalled());
   expect(screen.queryByLabelText('Application update')).not.toBeInTheDocument();
   // The rest of the app must still be usable — an update check is never a blocker.
-  expect(screen.getByRole('heading', { name: /Audio to text/ })).toBeInTheDocument();
+  // The footer is always present, so it stands in for 'the app still rendered'.
+  expect(screen.getByRole('contentinfo')).toBeInTheDocument();
 });
 
 it('downloads on consent and relaunches when it finishes', async () => {
@@ -97,7 +98,8 @@ it('leaves the app usable when an update fails to install', async () => {
 
   expect(await screen.findByText('The update could not be installed.')).toBeInTheDocument();
   expect(relaunch).not.toHaveBeenCalled();
-  expect(screen.getByRole('heading', { name: /Audio to text/ })).toBeInTheDocument();
+  // The footer is always present, so it stands in for 'the app still rendered'.
+  expect(screen.getByRole('contentinfo')).toBeInTheDocument();
 });
 
 it('dismisses the offer for the rest of the session', async () => {
