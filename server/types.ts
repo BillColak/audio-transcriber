@@ -27,6 +27,12 @@ export interface Transcript {
   chatMessages: ChatMessage[];
 }
 
+/** The result of testing an API key from the Settings screen. */
+export interface KeyCheck {
+  ok: boolean;
+  message: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';

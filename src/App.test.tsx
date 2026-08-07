@@ -17,13 +17,16 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-interface ApiMock { history?: unknown[]; settings?: unknown; onPut?: (body: string) => Response; onChat?: (body: string) => Response }
+interface ApiMock { history?: unknown[]; settings?: unknown; onPut?: (body: string) => Response; onChat?: (body: string) => Response; onTest?: (body: string) => Response }
 
 /** The app calls /api/transcriptions, /api/settings, and per-transcript /chat, so the mock has to route. */
-function mockApi({ history = [], settings = configured, onPut, onChat }: ApiMock = {}) {
+function mockApi({ history = [], settings = configured, onPut, onChat, onTest }: ApiMock = {}) {
   const put = onPut ?? (() => json(settings));
   return vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
     const url = String(input);
+    if (url.endsWith('/api/settings/test')) {
+      return Promise.resolve((onTest ?? (() => json({ ok: true, message: 'The key works.' })))(String(init?.body ?? '')));
+    }
     if (url.endsWith('/api/settings')) {
       return Promise.resolve(init?.method === 'PUT' ? put(String(init.body)) : json(settings));
     }
@@ -51,7 +54,7 @@ it('offers a summarise toggle beside the transcribe button', async () => {
 
   render(<App />);
 
-  const toggle = screen.getByRole('checkbox', { name: /Summarise when done/ });
+  const toggle = screen.getByRole('checkbox', { name: /Write meeting minutes/ });
   expect(toggle).not.toBeChecked();
   fireEvent.click(toggle);
   expect(toggle).toBeChecked();
@@ -64,8 +67,8 @@ it('shows the generated summary with a copy affordance', async () => {
 
   fireEvent.click(await screen.findByRole('button', { name: /Rapat/ }));
   await waitFor(() => expect(screen.getByText(/Semua berjalan baik\./)).toBeInTheDocument());
-  expect(screen.getByRole('button', { name: 'Copy summary' })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Hide summary' }));
+  expect(screen.getByRole('button', { name: 'Copy minutes' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Hide minutes' }));
   expect(screen.queryByText(/Semua berjalan baik\./)).not.toBeInTheDocument();
 });
 
@@ -152,4 +155,34 @@ it('lets the full transcript be hidden to reduce clutter', async () => {
 
   fireEvent.click(screen.getByRole('button', { name: 'Show transcript' }));
   expect(screen.getByLabelText('Full transcript')).toBeInTheDocument();
+});
+
+it('tests a typed API key and reports the verdict without saving it', async () => {
+  const fetchMock = mockApi({ settings: { ...configured, hasApiKey: false, keySource: null } });
+
+  render(<App />);
+
+  const field = await screen.findByLabelText(/OpenAI API key/);
+  fireEvent.change(field, { target: { value: 'sk-a-key-long-enough-to-pass' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Test key' }));
+
+  expect(await screen.findByText(/The key works\./)).toBeInTheDocument();
+  const tested = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/api/settings/test'));
+  expect(JSON.parse(String(tested?.[1]?.body))).toEqual({ apiKey: 'sk-a-key-long-enough-to-pass' });
+  // Testing is not saving: nothing should have been PUT.
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
+});
+
+it('surfaces a rejected key as an error', async () => {
+  mockApi({
+    settings: { ...configured, hasApiKey: false, keySource: null },
+    onTest: () => json({ ok: false, message: 'OpenAI rejected this key. Check it was copied in full.' }),
+  });
+
+  render(<App />);
+
+  fireEvent.change(await screen.findByLabelText(/OpenAI API key/), { target: { value: 'sk-wrong' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Test key' }));
+
+  expect(await screen.findByText(/OpenAI rejected this key/)).toBeInTheDocument();
 });

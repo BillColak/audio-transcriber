@@ -1,10 +1,10 @@
 import OpenAI from 'openai';
 import type { ChatMessage } from './types.js';
 
-export const DEFAULT_CHAT_MODEL = 'gpt-5-mini';
+export const DEFAULT_CHAT_MODEL = 'gpt-5.6-terra';
 
-/** Same ceiling as the summarizer — keeps a 20-hour recording from blowing past the model's context window. */
-const MAX_INPUT_CHARACTERS = 400_000;
+/** Same ceiling as the summarizer — a cost guard rather than a capacity limit. */
+const MAX_INPUT_CHARACTERS = 800_000;
 
 /** All Q&A pairs are persisted on the transcript, but only the most recent turns are replayed to the model. */
 const MAX_HISTORY_MESSAGES = 20;
@@ -12,7 +12,7 @@ const MAX_HISTORY_MESSAGES = 20;
 const instructions = [
   'You answer questions about a single transcript, using only the transcript text provided.',
   'If the answer is not in the transcript, say so plainly rather than guessing.',
-  'The transcript is machine-generated and may contain mishearings; interpret intent charitably.',
+  'The transcript is machine-generated from audio and will contain mishearings. Work out from the surrounding context what was meant rather than taking a garbled phrase literally, and say when a passage is genuinely unintelligible instead of guessing.',
   'Answer in the same language as the question when reasonable, otherwise match the transcript\'s own language.',
   'Keep answers concise unless the user asks for detail.',
 ].join('\n');

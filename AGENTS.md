@@ -16,7 +16,7 @@ A private, local-only app that transcribes long recordings (including an explici
 - `npm run lint` — ESLint (flat config, `eslint.config.js`).
 - `npm run dev:tauri` / `npm run build:tauri` — the desktop app. Both run `npm run tauri:prepare` first (see **Desktop packaging**). `build:tauri` needs Rust and a C toolchain; it writes an installer to `src-tauri/target/release/bundle/`.
 
-Requires Node 22+, and `OPENAI_API_KEY` in a `.env` file at the repo root (loaded via `dotenv`; the key never reaches the browser). Two optional overrides: `OPENAI_TRANSCRIBE_MODEL` (default `gpt-transcribe`) and `OPENAI_SUMMARY_MODEL` (default `gpt-5-mini`).
+Requires Node 22+, and `OPENAI_API_KEY` in a `.env` file at the repo root (loaded via `dotenv`; the key never reaches the browser). Three optional overrides: `OPENAI_TRANSCRIBE_MODEL` (default `gpt-transcribe`), `OPENAI_SUMMARY_MODEL` and `OPENAI_CHAT_MODEL` (both default `gpt-5.6-terra`).
 
 ## Architecture
 

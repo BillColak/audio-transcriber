@@ -8,7 +8,7 @@ import { MAX_UPLOAD_BYTES, validateAudioFile } from './domain.js';
 import { toMarkdown, toText } from './exports.js';
 import { humanizeChatError } from './openai-chat.js';
 import type { TranscriptStore } from './store.js';
-import type { ChatMessage, LanguagePreference, Segment, SettingsSnapshot, Transcript } from './types.js';
+import type { ChatMessage, KeyCheck, LanguagePreference, Segment, SettingsSnapshot, Transcript } from './types.js';
 
 /** The slice of `SettingsStore` the HTTP layer is allowed to see. */
 export interface SettingsPort {
@@ -23,6 +23,8 @@ interface AppOptions {
   enqueue(id: string, uploadPath: string): void;
   cancel(id: string): boolean;
   ask(transcriptText: string, history: ChatMessage[], question: string): Promise<string>;
+  /** Called with an empty string to test whatever key is already saved. */
+  verify(apiKey: string): Promise<KeyCheck>;
 }
 
 export function createApp(options: AppOptions) {
@@ -43,6 +45,12 @@ export function createApp(options: AppOptions) {
       return res.status(400).json({ error: error instanceof Error ? error.message : 'Could not save the API key.' });
     }
     res.json(options.settings.snapshot());
+  });
+  // Tests the key typed into the form, or the saved one when the field is left blank, so it can
+  // be checked before saving and re-checked afterwards.
+  app.post('/api/settings/test', async (req, res) => {
+    const apiKey = typeof req.body?.apiKey === 'string' ? req.body.apiKey : '';
+    res.json(await options.verify(apiKey));
   });
   app.get('/api/transcriptions', async (_req, res) => res.json(await options.store.list()));
   app.get('/api/transcriptions/:id', async (req, res) => {

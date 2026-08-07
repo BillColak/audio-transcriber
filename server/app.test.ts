@@ -27,7 +27,7 @@ describe('transcript API', () => {
       segments: [{ id: '0-0', startSeconds: 0, endSeconds: 3, text: 'Halo' }], text: 'Halo', error: null,
       summarize: true, summary: '## Summary\nSemua baik.', summaryError: null, chatMessages: [],
     });
-    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, ask: () => Promise.resolve('stub answer') });
+    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, verify: () => Promise.resolve({ ok: true, message: 'stub' }), ask: () => Promise.resolve('stub answer') });
 
     expect((await request(app).get('/api/transcriptions')).body[0].language).toBe('indonesian');
     await request(app).patch('/api/transcriptions/saved').send({ title: 'Pertemuan', text: 'Selamat pagi semuanya' }).expect(200);
@@ -42,7 +42,7 @@ describe('transcript API', () => {
   it('records the summarize choice from the upload form', async () => {
     const { dir, store, settings } = await scaffold();
     const enqueue = vi.fn();
-    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue, cancel: () => false, ask: () => Promise.resolve('stub answer') });
+    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue, cancel: () => false, verify: () => Promise.resolve({ ok: true, message: 'stub' }), ask: () => Promise.resolve('stub answer') });
 
     await request(app).post('/api/transcriptions')
       .field('language', 'indonesian').field('summarize', 'true')
@@ -65,7 +65,7 @@ describe('transcript API', () => {
       segments: [{ id: '0-0', startSeconds: 0, endSeconds: 3, text: 'Halo' }], text: 'Halo', error: null,
       summarize: false, summary: null, summaryError: null, chatMessages: [],
     });
-    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, ask: () => Promise.resolve('stub answer') });
+    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, verify: () => Promise.resolve({ ok: true, message: 'stub' }), ask: () => Promise.resolve('stub answer') });
 
     await request(app).get('/api/transcriptions/plain/download?format=md').expect(404);
   });
@@ -75,7 +75,7 @@ describe('settings API', () => {
   it('reports whether a key is configured and accepts a new one, never echoing it back', async () => {
     vi.stubEnv('OPENAI_API_KEY', '');
     const { dir, store, settings } = await scaffold();
-    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, ask: () => Promise.resolve('stub answer') });
+    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, verify: () => Promise.resolve({ ok: true, message: 'stub' }), ask: () => Promise.resolve('stub answer') });
 
     const before = await request(app).get('/api/settings').expect(200);
     expect(before.body).toEqual({ hasApiKey: false, keySource: null, transcribeModel: 'gpt-transcribe', summaryModel: 'gpt-5-mini' });
@@ -88,10 +88,40 @@ describe('settings API', () => {
 
   it('refuses a key that is obviously wrong', async () => {
     const { dir, store, settings } = await scaffold();
-    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, ask: () => Promise.resolve('stub answer') });
+    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, verify: () => Promise.resolve({ ok: true, message: 'stub' }), ask: () => Promise.resolve('stub answer') });
 
     const response = await request(app).put('/api/settings').send({ apiKey: 'nope' }).expect(400);
     expect(response.body.error).toMatch(/does not look like an OpenAI API key/);
+  });
+
+  it('tests the key that was typed in, without saving it', async () => {
+    const { dir, store, settings } = await scaffold();
+    const verify = vi.fn().mockResolvedValue({ ok: true, message: 'The key works.' });
+    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, verify, ask: () => Promise.resolve('stub answer') });
+
+    const response = await request(app).post('/api/settings/test').send({ apiKey: 'sk-typed-but-not-saved-1234' }).expect(200);
+    expect(verify).toHaveBeenCalledWith('sk-typed-but-not-saved-1234');
+    expect(response.body).toEqual({ ok: true, message: 'The key works.' });
+    // Testing must not persist anything — that is what Save is for.
+    expect(settings.apiKey()).toBeUndefined();
+  });
+
+  it('tests the saved key when the field is left blank', async () => {
+    const { dir, store, settings } = await scaffold();
+    const verify = vi.fn().mockResolvedValue({ ok: true, message: 'The key works.' });
+    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, verify, ask: () => Promise.resolve('stub answer') });
+
+    await request(app).post('/api/settings/test').send({}).expect(200);
+    expect(verify).toHaveBeenCalledWith('');
+  });
+
+  it('reports a rejected key without turning it into an HTTP error', async () => {
+    const { dir, store, settings } = await scaffold();
+    const verify = vi.fn().mockResolvedValue({ ok: false, message: 'OpenAI rejected this key. Check it was copied in full.' });
+    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, verify, ask: () => Promise.resolve('stub answer') });
+
+    const response = await request(app).post('/api/settings/test').send({ apiKey: 'sk-wrong' }).expect(200);
+    expect(response.body).toEqual({ ok: false, message: 'OpenAI rejected this key. Check it was copied in full.' });
   });
 });
 
@@ -110,7 +140,7 @@ describe('chat API', () => {
 
   it('404s for an unknown transcript', async () => {
     const { dir, store, settings } = await scaffold();
-    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, ask: () => Promise.resolve('stub') });
+    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, verify: () => Promise.resolve({ ok: true, message: 'stub' }), ask: () => Promise.resolve('stub') });
 
     const response = await request(app).post('/api/transcriptions/missing/chat').send({ question: 'What was discussed?' });
     expect(response.status).toBe(404);
@@ -118,7 +148,7 @@ describe('chat API', () => {
 
   it('400s for an empty question', async () => {
     const { dir, store, settings } = await withTranscript();
-    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, ask: () => Promise.resolve('stub') });
+    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, verify: () => Promise.resolve({ ok: true, message: 'stub' }), ask: () => Promise.resolve('stub') });
 
     const response = await request(app).post('/api/transcriptions/saved/chat').send({ question: '   ' });
     expect(response.status).toBe(400);
@@ -126,7 +156,7 @@ describe('chat API', () => {
 
   it('400s when the transcript has no text yet', async () => {
     const { dir, store, settings } = await withTranscript({ text: '', status: 'processing' });
-    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, ask: () => Promise.resolve('stub') });
+    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, verify: () => Promise.resolve({ ok: true, message: 'stub' }), ask: () => Promise.resolve('stub') });
 
     const response = await request(app).post('/api/transcriptions/saved/chat').send({ question: 'What was discussed?' });
     expect(response.status).toBe(400);
@@ -135,7 +165,7 @@ describe('chat API', () => {
   it('answers a question and appends it to the persisted chat history', async () => {
     const { dir, store, settings } = await withTranscript();
     const ask = vi.fn().mockResolvedValue('They discussed the budget.');
-    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, ask });
+    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, verify: () => Promise.resolve({ ok: true, message: 'stub' }), ask });
 
     const response = await request(app).post('/api/transcriptions/saved/chat').send({ question: 'What did they discuss?' }).expect(200);
     expect(ask).toHaveBeenCalledWith('Halo', [], 'What did they discuss?');
@@ -156,7 +186,7 @@ describe('chat API', () => {
       await store.save(edited);
       return 'They discussed the budget.';
     });
-    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, ask });
+    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, verify: () => Promise.resolve({ ok: true, message: 'stub' }), ask });
 
     await request(app).post('/api/transcriptions/saved/chat').send({ question: 'What did they discuss?' }).expect(200);
 
@@ -169,7 +199,7 @@ describe('chat API', () => {
   it('maps an upstream failure to a 502 with a humanized message', async () => {
     const { dir, store, settings } = await withTranscript();
     const ask = vi.fn().mockRejectedValue(new Error('401 authentication failed'));
-    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, ask });
+    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, verify: () => Promise.resolve({ ok: true, message: 'stub' }), ask });
 
     const response = await request(app).post('/api/transcriptions/saved/chat').send({ question: 'Anything?' });
     expect(response.status).toBe(502);
