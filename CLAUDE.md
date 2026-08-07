@@ -41,6 +41,10 @@ no separate server process. `src-tauri/src/` holds it:
   field**; that is precisely how the OpenAI SDK encodes an array, and a singular `language` is
   silently ignored by the model. Summarisation sends `reasoning_effort: "high"`. No `temperature` or
   `max_tokens` — the gpt-5 family rejects both.
+- `api.rs`'s upload handler treats a multipart **stream error as a failure, not end-of-body**, in both
+  the field loop and the chunk loop. The upload Cancel button aborts the request mid-body; swallowing
+  that error queues a job against truncated audio, which FFmpeg often still decodes — so the user is
+  billed for transcribing an upload they cancelled. `Err` and `Ok(None)` must stay distinct.
 - `store.rs` — one JSON file per transcript. Ids come off the URL, so they are **whitelisted**, not
   sanitised. `Transcript` deserialises records the old TypeScript backend wrote; fields added later
   are `serde(default)`, and `list()` skips an unreadable file rather than failing the whole history.

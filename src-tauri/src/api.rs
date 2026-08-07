@@ -142,7 +142,21 @@ async fn create(State(state): State<Shared>, mut multipart: Multipart) -> Respon
     let mut language_field = String::new();
     let mut summarize_field = String::new();
 
-    while let Ok(Some(mut field)) = multipart.next_field().await {
+    loop {
+        // A stream error between parts must not read as end-of-body. The upload Cancel button
+        // aborts the request mid-body, and treating that as a finished upload queues a job against
+        // truncated audio — which FFmpeg often still decodes, so the user is billed for
+        // transcribing an upload they explicitly cancelled.
+        let mut field = match multipart.next_field().await {
+            Ok(Some(field)) => field,
+            Ok(None) => break,
+            Err(_) => {
+                if let Some(path) = &upload_path {
+                    let _ = tokio::fs::remove_file(path).await;
+                }
+                return error(StatusCode::BAD_REQUEST, "Upload failed.");
+            }
+        };
         match field.name().unwrap_or_default() {
             "audio" => {
                 original_name = field.file_name().unwrap_or("audio").to_string();
