@@ -153,7 +153,7 @@ export default function App() {
   const needsKey = settings !== null && !settings.hasApiKey;
 
   return <div className="app-shell">
-    <header className="hero"><div className="brand-mark" aria-hidden="true">⌁</div><div><p className="eyebrow">PRIVATE · LOCAL · TIMESTAMPED</p><h1>Audio to text,<br/><span>without the clutter.</span></h1><p className="intro">Drop in a recording. Get a clean, editable transcript with precise timestamps—kept in your own local history.</p></div>
+    <header className="hero"><div className="brand-mark" aria-hidden="true">⌁</div>
       {settings && !needsKey && <button className="settings-button" onClick={() => setSettingsOpen((open) => !open)} aria-expanded={settingsOpen}>Settings</button>}</header>
     {update.stage !== 'idle' && <section className="update-banner" role="status" aria-label="Application update">
       {update.stage === 'available' && <>
