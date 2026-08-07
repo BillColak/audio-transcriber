@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { useUpdate } from './useUpdate';
 import './styles.css';
 
 type Status = 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
@@ -44,6 +45,7 @@ export default function App() {
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [chatSelectedId, setChatSelectedId] = useState<string | null>(null);
   const requestRef = useRef<XMLHttpRequest | null>(null);
+  const update = useUpdate();
 
   if ((selected?.id ?? null) !== chatSelectedId) {
     setChatSelectedId(selected?.id ?? null);
@@ -153,6 +155,24 @@ export default function App() {
   return <div className="app-shell">
     <header className="hero"><div className="brand-mark" aria-hidden="true">⌁</div><div><p className="eyebrow">PRIVATE · LOCAL · TIMESTAMPED</p><h1>Audio to text,<br/><span>without the clutter.</span></h1><p className="intro">Drop in a recording. Get a clean, editable transcript with precise timestamps—kept in your own local history.</p></div>
       {settings && !needsKey && <button className="settings-button" onClick={() => setSettingsOpen((open) => !open)} aria-expanded={settingsOpen}>Settings</button>}</header>
+    {update.stage !== 'idle' && <section className="update-banner" role="status" aria-label="Application update">
+      {update.stage === 'available' && <>
+        <div><strong>Version {update.version} is available.</strong>{update.notes && <p>{update.notes}</p>}</div>
+        <div className="update-actions">
+          <button className="text-button" onClick={update.dismiss}>Later</button>
+          <button className="primary" onClick={update.install}>Update now</button>
+        </div>
+      </>}
+      {update.stage === 'downloading' && <>
+        <div><strong>Downloading version {update.version}…</strong><p>The app will restart once it finishes.</p></div>
+        <progress value={update.progress ?? 0} max="100"/>
+      </>}
+      {update.stage === 'failed' && <>
+        <div><strong>The update could not be installed.</strong><p>You can carry on as normal and try again later.</p></div>
+        <div className="update-actions"><button className="text-button" onClick={update.dismiss}>Dismiss</button></div>
+      </>}
+    </section>}
+
     <main>
       {(needsKey || settingsOpen) && <section className="setup-card" aria-labelledby="setup-title">
         <div><p className="section-number">00</p><h2 id="setup-title">{needsKey ? 'Add your OpenAI key' : 'Settings'}</h2></div>

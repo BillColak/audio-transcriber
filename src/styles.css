@@ -7,3 +7,7 @@
 :root{scrollbar-color:#c7c8bd #f3f1e9}::-webkit-scrollbar{width:12px;height:12px}::-webkit-scrollbar-track{background:#f3f1e9}::-webkit-scrollbar-thumb{background:#c7c8bd;border-radius:6px;border:3px solid #f3f1e9}::-webkit-scrollbar-thumb:hover{background:#a9ac9f}
 .summary-body,.chat-messages{scrollbar-color:#c7c8bd #fffdf3}.summary-body::-webkit-scrollbar-track,.chat-messages::-webkit-scrollbar-track{background:#fffdf3}
 .transcript-body textarea{scrollbar-color:#c7c8bd #fff}.transcript-body textarea::-webkit-scrollbar-track{background:#fff}
+
+/* Update banner — between the hero and main, matching the dark cards. */
+.update-banner{margin:28px 6vw 0;background:#1c211d;color:#f7f4e9;border-left:3px solid #dbff4b;padding:18px 24px;display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap}.update-banner strong{display:block;font-size:16px}.update-banner p{margin:5px 0 0;font-size:13px;color:#b5bbb4;line-height:1.6;max-width:70ch}.update-banner progress{flex:1 1 220px;min-width:180px}.update-actions{display:flex;align-items:center;gap:18px}
+@media(max-width:800px){.update-banner{padding:18px;flex-direction:column;align-items:stretch}}

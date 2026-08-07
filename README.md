@@ -63,6 +63,20 @@ A summary that fails does not fail the job: the transcript is still saved and ma
 - Transcripts and the saved API key live in the per-user app data directory: `%APPDATA%\Audio Transcriber` on Windows, `~/Library/Application Support/Audio Transcriber` on macOS. The desktop app and `npm run dev` share that location.
 - Audio chunks are sent to OpenAI for transcription — and, if you ask for one, the transcript text is sent for summarisation. Both incur normal OpenAI API usage charges. Review current pricing and data controls in your OpenAI account.
 
+## Updates
+
+From 1.0.2 on, the app checks GitHub for a newer release each time it launches and offers it — nothing installs without you clicking **Update now**. Installs older than 1.0.2 have no updater and must be replaced by hand once.
+
+Cutting a release:
+
+1. Bump the version in `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`
+2. Tag it (`git tag v1.0.3 && git push origin v1.0.3`) — CI builds both platforms and drafts a release
+3. Check the draft has its installers **and `latest.json`**, then publish that draft
+
+Step 3 is the one that bites. The update feed reads the *latest published* release, so publishing a hand-made release instead of the CI draft leaves the feed pointing at something with no `latest.json`, and every client silently stops seeing updates.
+
+Signing: CI needs `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` as repository secrets, matching `plugins.updater.pubkey` in `tauri.conf.json`. **If the private key is lost, existing installs can never be updated again** — there is no recovery path, so keep a backup outside this machine.
+
 ## Building installers
 
 `npm run build:tauri` produces an installer for **the machine you run it on**, under `src-tauri/target/release/bundle/` — `nsis/Audio Transcriber_<version>_x64-setup.exe` on Windows, `dmg/*.dmg` on macOS.

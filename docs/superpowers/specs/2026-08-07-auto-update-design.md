@@ -128,6 +128,7 @@ Locally-built installers with `api-key.txt` baked in must stop being distributed
 - **Private key loss is unrecoverable.** Back it up before the first signed release.
 - **macOS is best-effort.** These builds are unsigned, and Gatekeeper's handling of a replaced unsigned bundle needs verification against real behaviour rather than assumption. Windows is the platform in actual use; verify it properly and treat macOS as unproven until someone tests it.
 - **A bad release is harder to recall** once it auto-installs. The draft gate is the mitigation.
+- **Publishing the wrong release breaks the feed silently.** This already happened once on v1.0.1: CI attached its installers to a draft, a separate release was hand-made on the same tag and published, and the published one had no assets. With the updater live that failure means `latest.json` is missing and every client quietly gets nothing. Always publish the draft CI created; never hand-roll a release.
 
 ## Out of scope
 
