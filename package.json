@@ -1,7 +1,7 @@
 {
   "name": "audio-transcriber",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"vite\" \"npm run dev:server\"",
@@ -33,6 +33,8 @@
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "concurrently": "latest",
+    "dotenv": "latest",
     "eslint": "latest",
     "eslint-plugin-react-hooks": "latest",
     "eslint-plugin-react-refresh": "latest",
@@ -40,8 +42,6 @@
     "jsdom": "latest",
     "typescript": "latest",
     "typescript-eslint": "latest",
-    "vitest": "latest",
-    "dotenv": "latest",
-    "concurrently": "latest"
+    "vitest": "latest"
   }
 }
