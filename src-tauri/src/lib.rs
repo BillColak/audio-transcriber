@@ -1,107 +1,156 @@
-use std::collections::HashMap;
+mod api;
+mod domain;
+mod exports;
+mod media;
+mod openai;
+mod paths;
+mod processor;
+mod queue;
+mod settings;
+mod store;
+mod types;
+
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tauri::{AppHandle, Manager, RunEvent};
-use tauri_plugin_shell::process::{CommandChild, CommandEvent};
-use tauri_plugin_shell::ShellExt;
 
-/// The Express backend binds this port on 127.0.0.1; the frontend talks to it directly.
-const BACKEND_PORT: u16 = 8787;
+use crate::api::AppState;
+use crate::media::FfmpegMedia;
+use crate::processor::{JobProcessor, ProcessingTools};
+use crate::queue::JobQueue;
+use crate::settings::{Models, SettingsStore};
+use crate::store::TranscriptStore;
 
-/// Holds the sidecar so it can be killed when the app closes.
-#[derive(Default)]
-struct Backend(Mutex<Option<CommandChild>>);
+/// The backend binds this port on 127.0.0.1; the frontend talks to it directly.
+pub const BACKEND_PORT: u16 = 8787;
 
-/// A developer running `npm run dev` already owns the port — don't fight them for it.
+/// A developer running the standalone server already owns the port — don't fight them for it.
 fn backend_already_running() -> bool {
     let address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, BACKEND_PORT));
     TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok()
 }
 
-/// Resources are declared in tauri.conf.json as `resources/*`, so they keep that prefix
-/// inside the bundle. The flat fallback keeps this working if that ever changes.
-fn resource_root(app: &AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let base = app.path().resource_dir()?;
+/// Resources are declared in tauri.conf.json as `resources/*`, so they keep that prefix inside
+/// the bundle. The flat fallback keeps this working if that ever changes.
+fn resource_root(app: &AppHandle) -> Option<PathBuf> {
+    let base = app.path().resource_dir().ok()?;
     let nested = base.join("resources");
-    Ok(if nested.join("server.mjs").is_file() {
+    let ffmpeg = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+    Some(if nested.join(ffmpeg).is_file() {
         nested
     } else {
         base
     })
 }
 
-/// On Windows `resource_dir()` can return a verbatim path (`\\?\C:\...`). Node cannot resolve a
-/// main module through that prefix: it dies with `EISDIR: illegal operation on a directory,
-/// lstat 'C:'` before the script runs at all. Rust's own fs calls are happy either way, so the
-/// prefix is only stripped on the way out to the sidecar.
-fn plain(path: &Path) -> String {
-    let text = path.to_string_lossy().into_owned();
-    #[cfg(windows)]
-    // `\\?\UNC\server\share` has no plain drive-letter form, so leave that shape alone.
-    if let Some(rest) = text.strip_prefix(r"\\?\") {
-        if !rest.starts_with("UNC\\") {
-            return rest.to_string();
-        }
-    }
-    text
+/// Everything the processor needs, wired to the real FFmpeg binary and OpenAI. This is the only
+/// place adapters are constructed; the pipeline itself never learns where they came from.
+struct Tools {
+    media: FfmpegMedia,
+    settings: Arc<SettingsStore>,
 }
 
-/// The sidecar binary is a plain Node runtime, so the backend is handed to it as a script argument.
-fn spawn_backend(app: &AppHandle) -> Result<CommandChild, Box<dyn std::error::Error>> {
-    let root = resource_root(app)?;
-    let script = root.join("server.mjs");
-    if !script.is_file() {
-        return Err(format!("bundled backend is missing at {}", script.display()).into());
-    }
-    let ffmpeg = root.join(if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" });
-
-    let mut env = HashMap::new();
-    env.insert("AUDIO_TRANSCRIBER_FFMPEG".to_string(), plain(&ffmpeg));
-
-    // Baked in by scripts/prepare-sidecar.mjs from the build machine's .env, so this private,
-    // never-publicly-distributed build never shows the in-app "add your key" screen.
-    let api_key_file = root.join("api-key.txt");
-    if let Ok(key) = std::fs::read_to_string(&api_key_file) {
-        let trimmed = key.trim();
-        if !trimmed.is_empty() {
-            env.insert("OPENAI_API_KEY".to_string(), trimmed.to_string());
-        }
+#[async_trait::async_trait]
+impl ProcessingTools for Tools {
+    async fn prepare(
+        &self,
+        input: &Path,
+        job_id: &str,
+    ) -> Result<Vec<crate::media::PreparedChunk>, String> {
+        self.media.prepare(input, job_id).await
     }
 
-    let (mut events, child) = app
-        .shell()
-        .sidecar("server")?
-        .args([plain(&script)])
-        .envs(env)
-        .spawn()?;
+    async fn transcribe(
+        &self,
+        chunk: &Path,
+        languages: Option<Vec<String>>,
+    ) -> Result<String, String> {
+        // Read per job, not at boot, so a key saved in Settings takes effect without a restart.
+        let key = self
+            .settings
+            .api_key()
+            .ok_or("OPENAI_API_KEY is not configured.")?;
+        let model = self.settings.models().transcribe.clone();
+        crate::openai::transcribe(&key, &model, chunk, languages).await
+    }
 
-    tauri::async_runtime::spawn(async move {
-        while let Some(event) = events.recv().await {
-            match event {
-                CommandEvent::Stdout(line) => {
-                    log::info!("backend: {}", String::from_utf8_lossy(&line).trim_end());
-                }
-                CommandEvent::Stderr(line) => {
-                    log::warn!("backend: {}", String::from_utf8_lossy(&line).trim_end());
-                }
-                CommandEvent::Terminated(payload) => {
-                    log::warn!("backend exited with {:?}", payload.code);
-                }
-                _ => {}
-            }
-        }
+    async fn summarize(&self, transcript_text: &str) -> Result<String, String> {
+        let key = self
+            .settings
+            .api_key()
+            .ok_or("OPENAI_API_KEY is not configured.")?;
+        let model = self.settings.models().summary.clone();
+        crate::openai::summarize(&key, &model, transcript_text).await
+    }
+}
+
+/// Builds the whole backend and serves it. Shared by the desktop app and the standalone dev
+/// binary so there is exactly one composition root.
+pub async fn serve(bundled_ffmpeg: Option<PathBuf>) -> Result<(), String> {
+    // A developer's repo `.env` still works; a packaged app has none and uses Settings instead.
+    let _ = dotenvy::dotenv();
+    let app_data = paths::app_data_directory();
+    let data_directory = app_data.join("transcripts");
+    let work_directory = std::env::temp_dir().join("audio-transcriber");
+    let upload_directory = work_directory.join("uploads");
+    tokio::fs::create_dir_all(&data_directory)
+        .await
+        .map_err(|e| e.to_string())?;
+    tokio::fs::create_dir_all(&upload_directory)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let store = TranscriptStore::new(&data_directory);
+    // The queue lives in memory, so anything left mid-flight by a crash is marked failed here.
+    store.recover_interrupted().await?;
+
+    let models = Models {
+        transcribe: std::env::var("OPENAI_TRANSCRIBE_MODEL")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| openai::DEFAULT_TRANSCRIBE_MODEL.to_string()),
+        summary: std::env::var("OPENAI_SUMMARY_MODEL")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| openai::DEFAULT_SUMMARY_MODEL.to_string()),
+        chat: std::env::var("OPENAI_CHAT_MODEL")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| openai::DEFAULT_CHAT_MODEL.to_string()),
+    };
+    let settings = Arc::new(SettingsStore::new(&app_data, models));
+    settings.load().await;
+
+    let ffmpeg = media::resolve_ffmpeg(bundled_ffmpeg.as_deref());
+    log::info!("ffmpeg: {}", ffmpeg.display());
+    let tools = Arc::new(Tools {
+        media: FfmpegMedia::new(&work_directory, ffmpeg),
+        settings: settings.clone(),
     });
+    let processor = JobProcessor::new(store.clone(), tools);
+    let queue = JobQueue::new(processor, store.clone());
 
-    Ok(child)
+    let state = Arc::new(AppState {
+        store,
+        settings,
+        queue,
+        upload_directory,
+    });
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, BACKEND_PORT))
+        .await
+        .map_err(|e| format!("Could not bind 127.0.0.1:{BACKEND_PORT}: {e}"))?;
+    log::info!("Audio Transcriber server: http://127.0.0.1:{BACKEND_PORT}");
+    axum::serve(listener, api::router(state))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(
@@ -109,53 +158,34 @@ pub fn run() {
                 .level(log::LevelFilter::Info)
                 .build(),
         )
-        .manage(Backend::default())
         .setup(|app| {
             if backend_already_running() {
                 log::info!("127.0.0.1:{BACKEND_PORT} is already served; reusing that backend");
             } else {
-                match spawn_backend(app.handle()) {
-                    Ok(child) => {
-                        *app.state::<Backend>().0.lock().unwrap() = Some(child);
-                        log::info!("backend starting on 127.0.0.1:{BACKEND_PORT}");
+                let root = resource_root(app.handle());
+                // Baked in by scripts/prepare-resources.mjs from the build machine's .env, so a
+                // private build never shows the "add your key" screen. Public CI has no key, so
+                // the file is absent there and Settings takes over.
+                if let Some(root) = &root {
+                    if let Ok(key) = std::fs::read_to_string(root.join("api-key.txt")) {
+                        if !key.trim().is_empty() {
+                            unsafe { std::env::set_var("OPENAI_API_KEY", key.trim()) };
+                        }
                     }
-                    // The window still opens: the frontend retries, then explains itself.
-                    Err(error) => log::error!("could not start the backend: {error}"),
                 }
+                let bundled = root
+                    .map(|root| root.join(if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" }));
+                // The backend now runs inside this process, so there is no child to kill on exit
+                // and no sidecar to keep alive — it goes when the app goes.
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = serve(bundled).await {
+                        log::error!("backend stopped: {error}");
+                    }
+                });
             }
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
-        .run(|app, event| {
-            if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
-                if let Some(child) = app.state::<Backend>().0.lock().unwrap().take() {
-                    let _ = child.kill();
-                }
-            }
-        });
-}
-
-#[cfg(all(test, windows))]
-mod tests {
-    use super::plain;
-    use std::path::Path;
-
-    const SCRIPT: &str = r"C:\Program Files\Audio Transcriber\resources\server.mjs";
-
-    #[test]
-    fn strips_the_verbatim_prefix_that_node_cannot_resolve() {
-        assert_eq!(plain(Path::new(&format!(r"\\?\{SCRIPT}"))), SCRIPT);
-    }
-
-    #[test]
-    fn leaves_an_ordinary_drive_path_alone() {
-        assert_eq!(plain(Path::new(SCRIPT)), SCRIPT);
-    }
-
-    #[test]
-    fn keeps_verbatim_unc_paths_intact() {
-        let unc = r"\\?\UNC\host\share\server.mjs";
-        assert_eq!(plain(Path::new(unc)), unc);
-    }
+        .run(|_app, _event: RunEvent| {});
 }

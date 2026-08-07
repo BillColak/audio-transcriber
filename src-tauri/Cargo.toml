@@ -1,8 +1,10 @@
 [package]
 name = "audio-transcriber"
-version = "1.0.2"
+version = "1.0.3"
 description = "Private, local audio transcription and meeting minutes"
 authors = ["Bill Colak"]
+# Two binaries exist (the app and the dev-only `serve`); without this the bundler picks the wrong one.
+default-run = "audio-transcriber"
 license = ""
 repository = "https://github.com/BillColak/audio-transcriber"
 edition = "2021"
@@ -26,3 +28,13 @@ tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
+axum = { version = "0.8.4", features = ["multipart"] }
+tokio = { version = "1.53.1", features = ["full"] }
+tower-http = { version = "0.7.0", features = ["fs", "cors"] }
+uuid = { version = "1.20.0", features = ["v4", "serde"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+reqwest = { version = "0.13.3", features = ["json", "multipart", "stream"] }
+dirs = "6.0.0"
+async-trait = "0.1.91"
+env_logger = "0.11.11"
+dotenvy = "0.15.7"

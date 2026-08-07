@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Audio Transcriber",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "identifier": "ai.trackpoint.audio-transcriber",
   "build": {
     "frontendDist": "../dist",
@@ -27,7 +27,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "app", "dmg"],
+    "targets": [
+      "nsis",
+      "app",
+      "dmg"
+    ],
     "category": "Productivity",
     "shortDescription": "Private, local audio transcription and meeting minutes.",
     "longDescription": "Turns long recordings into editable timestamped transcripts and meeting-minutes summaries. Audio never leaves this computer except for the chunks sent to OpenAI for transcription.",
@@ -38,8 +42,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/server"],
-    "resources": ["resources/*"],
+    "resources": [
+      "resources/*"
+    ],
     "createUpdaterArtifacts": true,
     "windows": {
       "nsis": {
@@ -57,5 +62,6 @@
         "https://github.com/BillColak/audio-transcriber/releases/latest/download/latest.json"
       ]
     }
-  }
+  },
+  "mainBinaryName": "audio-transcriber"
 }
