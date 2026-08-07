@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::io::AsyncWriteExt;
 
-use crate::domain::validate_audio_file;
+use crate::domain::{validate_audio_file, MAX_UPLOAD_BYTES};
 use crate::exports::{safe_filename, to_markdown, to_text};
 use crate::queue::JobQueue;
 use crate::settings::SettingsStore;
@@ -59,11 +59,23 @@ fn cors() -> tower_http::cors::CorsLayer {
                 let Ok(origin) = origin.to_str() else {
                     return false;
                 };
-                origin == "tauri://localhost"
-                    || origin == "https://tauri.localhost"
-                    || origin == "http://tauri.localhost"
-                    || origin.starts_with("http://127.0.0.1")
-                    || origin.starts_with("http://localhost")
+                if matches!(
+                    origin,
+                    "tauri://localhost" | "https://tauri.localhost" | "http://tauri.localhost"
+                ) {
+                    return true;
+                }
+                // Anchored on purpose: a bare `starts_with` would also accept
+                // `http://127.0.0.1.attacker.example`, which is a hostname anyone can register.
+                let Some(host) = origin.strip_prefix("http://") else {
+                    return false;
+                };
+                let (name, port) = match host.split_once(':') {
+                    Some((name, port)) => (name, Some(port)),
+                    None => (host, None),
+                };
+                (name == "127.0.0.1" || name == "localhost")
+                    && port.is_none_or(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
             },
         ))
         .allow_methods(tower_http::cors::Any)
@@ -93,8 +105,9 @@ async fn put_settings(State(state): State<Shared>, Json(body): Json<ApiKeyBody>)
 
 async fn test_settings(State(state): State<Shared>, Json(body): Json<ApiKeyBody>) -> Response {
     let typed = body.api_key.unwrap_or_default();
-    // An empty field means "test the key already saved".
-    let key = if typed.trim().is_empty() {
+    // Only a genuinely absent field falls back to the saved key. Whitespace is a typo, and saying
+    // so beats silently testing a different key than the one on screen.
+    let key = if typed.is_empty() {
         state.settings.api_key().unwrap_or_default()
     } else {
         typed
@@ -144,11 +157,31 @@ async fn create(State(state): State<Shared>, mut multipart: Multipart) -> Respon
                     return error(StatusCode::INTERNAL_SERVER_ERROR, "Upload failed.");
                 };
                 // Streamed to disk rather than buffered: a 2 GB recording must never sit in RAM.
-                while let Ok(Some(chunk)) = field.chunk().await {
-                    written += chunk.len() as u64;
-                    if file.write_all(&chunk).await.is_err() {
-                        let _ = tokio::fs::remove_file(&path).await;
-                        return error(StatusCode::INTERNAL_SERVER_ERROR, "Upload failed.");
+                loop {
+                    match field.chunk().await {
+                        Ok(Some(chunk)) => {
+                            written += chunk.len() as u64;
+                            // Enforced while streaming, not after: otherwise an oversized upload
+                            // is written to disk in full before being rejected.
+                            if written > MAX_UPLOAD_BYTES {
+                                let _ = tokio::fs::remove_file(&path).await;
+                                return error(
+                                    StatusCode::BAD_REQUEST,
+                                    "File exceeds the 2 GB limit.",
+                                );
+                            }
+                            if file.write_all(&chunk).await.is_err() {
+                                let _ = tokio::fs::remove_file(&path).await;
+                                return error(StatusCode::INTERNAL_SERVER_ERROR, "Upload failed.");
+                            }
+                        }
+                        Ok(None) => break,
+                        // A connection dropped mid-upload must not look like a finished one, or a
+                        // job gets queued against truncated audio and "succeeds" on half a meeting.
+                        Err(_) => {
+                            let _ = tokio::fs::remove_file(&path).await;
+                            return error(StatusCode::BAD_REQUEST, "Upload failed.");
+                        }
                     }
                 }
                 let _ = file.flush().await;

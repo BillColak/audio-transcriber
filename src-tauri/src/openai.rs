@@ -76,36 +76,67 @@ pub async fn transcribe(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "audio.mp3".into());
 
-    let part = reqwest::multipart::Part::bytes(bytes)
-        .file_name(filename)
-        .mime_str("audio/mpeg")
-        .map_err(|e| e.to_string())?;
-    let mut form = reqwest::multipart::Form::new()
-        .part("file", part)
-        .text("model", model.to_string())
-        .text("response_format", "json");
-    for code in languages.unwrap_or_default() {
-        form = form.text("languages[]", code);
-    }
+    let codes = languages.unwrap_or_default();
 
-    let response = client()?
-        .post(format!("{API_BASE}/audio/transcriptions"))
-        .bearer_auth(api_key)
-        .multipart(form)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !response.status().is_success() {
-        return Err(read_error(response).await);
-    }
-    let body: Value = response.json().await.map_err(|e| e.to_string())?;
-    body["text"]
-        .as_str()
-        .map(str::to_string)
-        .ok_or_else(|| "OpenAI returned no transcription text.".to_string())
+    with_retries(|| async {
+        // The form is not cloneable, so it is rebuilt per attempt from the bytes already read.
+        let part = reqwest::multipart::Part::bytes(bytes.clone())
+            .file_name(filename.clone())
+            .mime_str("audio/mpeg")
+            .map_err(|e| e.to_string())?;
+        let mut form = reqwest::multipart::Form::new()
+            .part("file", part)
+            .text("model", model.to_string())
+            .text("response_format", "json");
+        for code in codes.clone() {
+            form = form.text("languages[]", code);
+        }
+        let response = client()?
+            .post(format!("{API_BASE}/audio/transcriptions"))
+            .bearer_auth(api_key)
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !response.status().is_success() {
+            return Err(read_error(response).await);
+        }
+        let body: Value = response.json().await.map_err(|e| e.to_string())?;
+        body["text"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| "OpenAI returned no transcription text.".to_string())
+    })
+    .await
 }
 
 /// No `temperature` or `max_tokens`: the gpt-5 family rejects both on chat completions.
+/// The OpenAI SDK the TypeScript backend used retried twice by default. Without that a single
+/// 429 or 5xx kills a two-hour job that has already cost real money, so it is reproduced here.
+/// Only transient failures are retried — an authentication error is returned immediately.
+async fn with_retries<F, Fut>(attempt: F) -> Result<String, String>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<String, String>>,
+{
+    let mut last = String::new();
+    for tries in 0..3u32 {
+        match attempt().await {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                let transient = contains_any(&error, &["429", "500", "502", "503", "504", "timeout", "connect"])
+                    && !contains_any(&error, &["401", "invalid api key", "invalid_api_key"]);
+                last = error;
+                if !transient || tries == 2 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(500 * 2u64.pow(tries))).await;
+            }
+        }
+    }
+    Err(last)
+}
+
 async fn chat_completion(
     api_key: &str,
     model: &str,
@@ -116,26 +147,29 @@ async fn chat_completion(
     if let Some(effort) = reasoning_effort {
         payload["reasoning_effort"] = json!(effort);
     }
-    let response = client()?
-        .post(format!("{API_BASE}/chat/completions"))
-        .bearer_auth(api_key)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    if !response.status().is_success() {
-        return Err(read_error(response).await);
-    }
-    let body: Value = response.json().await.map_err(|e| e.to_string())?;
-    let content = body["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or_default()
-        .trim()
-        .to_string();
-    if content.is_empty() {
-        return Err("OpenAI returned an empty response.".into());
-    }
-    Ok(content)
+    with_retries(|| async {
+        let response = client()?
+            .post(format!("{API_BASE}/chat/completions"))
+            .bearer_auth(api_key)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !response.status().is_success() {
+            return Err(read_error(response).await);
+        }
+        let body: Value = response.json().await.map_err(|e| e.to_string())?;
+        let content = body["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if content.is_empty() {
+            return Err("OpenAI returned an empty response.".into());
+        }
+        Ok(content)
+    })
+    .await
 }
 
 pub async fn summarize(api_key: &str, model: &str, transcript: &str) -> Result<String, String> {
@@ -265,7 +299,7 @@ fn contains_any(haystack: &str, needles: &[&str]) -> bool {
 }
 
 pub fn humanize_key_error(message: &str) -> String {
-    if contains_any(message, &["401", "unauthorized", "invalid api key", "incorrect api key"]) {
+    if contains_any(message, &["401", "unauthorized", "invalid api key", "invalid_api_key", "incorrect api key"]) {
         return "OpenAI rejected this key. Check it was copied in full.".into();
     }
     if contains_any(message, &["429", "quota", "billing"]) {
@@ -278,21 +312,21 @@ pub fn humanize_key_error(message: &str) -> String {
 }
 
 pub fn humanize_error(message: &str) -> String {
-    if contains_any(message, &["api key", "api-key", "apikey", "401", "authentication"]) {
+    if contains_any(message, &["api key", "api-key", "api_key", "apikey", "401", "authentication"]) {
         return "OpenAI rejected the API key. Check it in Settings.".into();
     }
     format!("Transcription failed: {message}")
 }
 
 pub fn humanize_summary_error(message: &str) -> String {
-    if contains_any(message, &["api key", "api-key", "apikey", "401", "authentication"]) {
+    if contains_any(message, &["api key", "api-key", "api_key", "apikey", "401", "authentication"]) {
         return "OpenAI rejected the API key, so the summary was skipped.".into();
     }
     format!("The transcript is complete, but the summary failed: {message}")
 }
 
 pub fn humanize_chat_error(message: &str) -> String {
-    if contains_any(message, &["api key", "api-key", "apikey", "401", "authentication"]) {
+    if contains_any(message, &["api key", "api-key", "api_key", "apikey", "401", "authentication"]) {
         return "OpenAI rejected the API key. Check it in Settings.".into();
     }
     format!("The question could not be answered: {message}")
@@ -344,5 +378,47 @@ mod tests {
     #[test]
     fn short_text_is_left_alone() {
         assert_eq!(truncate("halo"), "halo");
+    }
+
+    #[test]
+    fn a_missing_key_still_tells_the_user_where_to_fix_it() {
+        // The Rust adapter reports `OPENAI_API_KEY is not configured.`, which a list of literal
+        // "api key" spellings would miss, leaving the user with a raw internal string.
+        assert_eq!(
+            humanize_error("OPENAI_API_KEY is not configured."),
+            "OpenAI rejected the API key. Check it in Settings."
+        );
+        assert!(humanize_summary_error("OPENAI_API_KEY is not configured.")
+            .contains("summary was skipped"));
+    }
+
+    #[tokio::test]
+    async fn retries_a_transient_failure_and_then_succeeds() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let calls = AtomicU32::new(0);
+        let result = with_retries(|| async {
+            if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                Err("429 rate limited".to_string())
+            } else {
+                Ok("done".to_string())
+            }
+        })
+        .await;
+        assert_eq!(result.unwrap(), "done");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn never_retries_an_authentication_failure() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let calls = AtomicU32::new(0);
+        // Retrying a bad key just burns time on a job that cannot succeed.
+        let result = with_retries(|| async {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Err("401 invalid api key".to_string())
+        })
+        .await;
+        assert!(result.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }

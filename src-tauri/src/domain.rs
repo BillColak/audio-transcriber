@@ -7,10 +7,16 @@ const SUPPORTED_EXTENSIONS: [&str; 9] = [
 ];
 
 pub fn validate_audio_file(filename: &str, size: u64) -> Result<(), String> {
-    let extension = filename
-        .rsplit_once('.')
-        .map(|(_, ext)| ext.to_ascii_lowercase())
-        .unwrap_or_default();
+    // Matches Node's `path.extname`: a leading dot is a hidden-file name, not an extension, so
+    // ".mp3" has no extension and is rejected rather than treated as an MP3.
+    let base = filename
+        .rsplit(|c| c == '/' || c == '\\')
+        .next()
+        .unwrap_or(filename);
+    let extension = match base.rfind('.') {
+        Some(0) | None => String::new(),
+        Some(index) => base[index + 1..].to_ascii_lowercase(),
+    };
     if !SUPPORTED_EXTENSIONS.contains(&extension.as_str()) {
         return Err("Unsupported audio format.".into());
     }
@@ -82,6 +88,16 @@ mod tests {
             validate_audio_file("notes.txt", 1024).unwrap_err(),
             "Unsupported audio format."
         );
+    }
+
+    #[test]
+    fn a_leading_dot_is_a_hidden_file_not_an_extension() {
+        // `path.extname(".mp3")` is "" in Node, so this was rejected before the port too.
+        assert!(validate_audio_file(".mp3", 1024).is_err());
+        assert!(validate_audio_file("noextension", 1024).is_err());
+        // A dot in a directory name must not be mistaken for the file's extension.
+        assert!(validate_audio_file("my.folder/recording.mp3", 1024).is_ok());
+        assert!(validate_audio_file("my.folder/recording", 1024).is_err());
     }
 
     #[test]
