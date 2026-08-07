@@ -19,11 +19,30 @@ export interface Transcript {
   updatedAt: string;
   durationSeconds: number;
   segments: Segment[];
+  text: string;
   error: string | null;
+  summarize: boolean;
+  summary: string | null;
+  summaryError: string | null;
+  chatMessages: ChatMessage[];
 }
 
-export interface RawSegment {
-  start: number;
-  end: number;
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+}
+
+/** What a transcription model returns for one prepared chunk. `gpt-transcribe` has no sub-segment timings. */
+export interface ChunkTranscription {
   text: string;
+}
+
+/** Everything the settings screen needs. Deliberately never includes the key itself. */
+export interface SettingsSnapshot {
+  hasApiKey: boolean;
+  keySource: 'settings' | 'environment' | null;
+  transcribeModel: string;
+  summaryModel: string;
 }

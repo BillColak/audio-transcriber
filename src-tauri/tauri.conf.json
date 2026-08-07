@@ -1,0 +1,52 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Audio Transcriber",
+  "version": "1.0.1",
+  "identifier": "ai.trackpoint.audio-transcriber",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeDevCommand": "npm run tauri:prepare && vite",
+    "beforeBuildCommand": "npm run build && npm run tauri:prepare"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Audio Transcriber",
+        "width": 1280,
+        "height": 880,
+        "minWidth": 900,
+        "minHeight": 620,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8787 ipc: http://ipc.localhost; img-src 'self' data: blob: asset: http://asset.localhost; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "app", "dmg"],
+    "category": "Productivity",
+    "shortDescription": "Private, local audio transcription and meeting minutes.",
+    "longDescription": "Turns long recordings into editable timestamped transcripts and meeting-minutes summaries. Audio never leaves this computer except for the chunks sent to OpenAI for transcription.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": ["binaries/server"],
+    "resources": ["resources/*"],
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
+  }
+}

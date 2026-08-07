@@ -1,13 +1,9 @@
-import { formatTimestamp } from './domain.js';
-import type { Segment } from './types.js';
+import type { Transcript } from './types.js';
 
-export function toText(segments: Segment[]): string {
-  return segments.map((segment) => `[${formatTimestamp(segment.startSeconds, false)}] ${segment.text}`).join('\n');
+export function toText(transcript: Transcript): string {
+  return transcript.text;
 }
 
-export function toVtt(segments: Segment[]): string {
-  const cues = segments.map((segment, index) =>
-    `${index + 1}\n${formatTimestamp(segment.startSeconds)} --> ${formatTimestamp(segment.endSeconds)}\n${segment.text}`,
-  );
-  return `WEBVTT\n\n${cues.join('\n\n')}\n`;
+export function toMarkdown(transcript: Transcript): string {
+  return `# ${transcript.title}\n\n${transcript.summary ?? ''}\n`;
 }

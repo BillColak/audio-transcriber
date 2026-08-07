@@ -16,14 +16,14 @@ export class TranscriptStore {
   }
 
   async get(id: string): Promise<Transcript | null> {
-    try { return JSON.parse(await readFile(this.file(id), 'utf8')) as Transcript; }
+    try { return normalize(JSON.parse(await readFile(this.file(id), 'utf8')) as Transcript); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
   }
 
   async list(): Promise<Transcript[]> {
     await mkdir(this.directory, { recursive: true });
     const files = (await readdir(this.directory)).filter((file) => file.endsWith('.json'));
-    const transcripts = await Promise.all(files.map(async (file) => JSON.parse(await readFile(path.join(this.directory, file), 'utf8')) as Transcript));
+    const transcripts = await Promise.all(files.map(async (file) => normalize(JSON.parse(await readFile(path.join(this.directory, file), 'utf8')) as Transcript)));
     return transcripts.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
@@ -41,4 +41,16 @@ export class TranscriptStore {
       }
     }
   }
+}
+
+/** Records written before the summary feature existed are missing these fields. */
+function normalize(transcript: Transcript): Transcript {
+  return {
+    ...transcript,
+    text: transcript.text ?? transcript.segments.map((s) => s.text).join(' '),
+    summarize: transcript.summarize ?? false,
+    summary: transcript.summary ?? null,
+    summaryError: transcript.summaryError ?? null,
+    chatMessages: transcript.chatMessages ?? [],
+  };
 }
