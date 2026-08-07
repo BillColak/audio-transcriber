@@ -47,6 +47,21 @@ fn locate(bundled: Option<&Path>) -> PathBuf {
     PathBuf::from("ffmpeg")
 }
 
+/// FFmpeg is a console program, so on Windows spawning it from a GUI app pops a console window —
+/// twice per chunk, which on a long recording is a flurry of black boxes over the user's screen.
+/// Node's `execFile` hid it; `Command` does not, so CREATE_NO_WINDOW has to be set by hand.
+fn ffmpeg_command(program: &Path) -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 #[derive(Clone)]
 pub struct FfmpegMedia {
     work_directory: PathBuf,
@@ -71,7 +86,7 @@ impl FfmpegMedia {
             .map_err(|e| e.to_string())?;
         let pattern = directory.join("chunk-%03d.mp3");
 
-        let output = Command::new(&self.ffmpeg)
+        let output = ffmpeg_command(&self.ffmpeg)
             .args([
                 "-y",
                 "-i",
@@ -131,7 +146,7 @@ impl FfmpegMedia {
 
     /// There is no ffprobe in the bundle, so duration comes from parsing FFmpeg's own stderr.
     async fn duration(&self, file: &Path) -> Result<f64, String> {
-        let output = Command::new(&self.ffmpeg)
+        let output = ffmpeg_command(&self.ffmpeg)
             .args(["-i", &file.to_string_lossy()])
             .output()
             .await
