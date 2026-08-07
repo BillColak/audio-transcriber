@@ -1,6 +1,6 @@
 [package]
 name = "audio-transcriber"
-version = "1.0.3"
+version = "1.0.4"
 description = "Private, local audio transcription and meeting minutes"
 authors = ["Bill Colak"]
 # Two binaries exist (the app and the dev-only `serve`); without this the bundler picks the wrong one.
