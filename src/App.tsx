@@ -19,6 +19,7 @@ const api = `${apiBase}/api/transcriptions`;
 const settingsApi = `${apiBase}/api/settings`;
 
 interface Settings { hasApiKey: boolean; keySource: 'settings' | 'environment' | null; transcribeModel: string; summaryModel: string }
+interface KeyCheck { ok: boolean; message: string }
 
 export default function App() {
   const [history, setHistory] = useState<Transcript[]>([]);
@@ -35,6 +36,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [savingKey, setSavingKey] = useState(false);
+  const [testingKey, setTestingKey] = useState(false);
+  const [keyCheck, setKeyCheck] = useState<KeyCheck | null>(null);
   const [chatDraft, setChatDraft] = useState('');
   const [chatSending, setChatSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
@@ -83,9 +86,19 @@ export default function App() {
       const response = await fetch(settingsApi, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: apiKeyDraft }) });
       const body = await response.json() as Settings & { error?: string };
       if (!response.ok) { setMessage(body.error ?? 'Could not save the API key.'); return; }
-      setSettings(body); setApiKeyDraft(''); setSettingsOpen(false); setMessage('API key saved.');
+      setSettings(body); setApiKeyDraft(''); setSettingsOpen(false); setKeyCheck(null); setMessage('API key saved.');
     } catch { setMessage('Could not reach the local transcription server.'); }
     finally { setSavingKey(false); }
+  };
+
+  /** Sends the typed key, or nothing at all to test the key already saved. */
+  const testApiKey = async () => {
+    setTestingKey(true); setKeyCheck(null);
+    try {
+      const response = await fetch(`${settingsApi}/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: apiKeyDraft }) });
+      setKeyCheck(await response.json() as KeyCheck);
+    } catch { setKeyCheck({ ok: false, message: 'Could not reach the local transcription server.' }); }
+    finally { setTestingKey(false); }
   };
   useEffect(() => {
     if (!history.some((item) => item.status === 'queued' || item.status === 'processing')) return;
@@ -119,7 +132,7 @@ export default function App() {
     await fetch(`${api}/${item.id}`, { method: 'DELETE' }); if (selected?.id === item.id) setSelected(null); void loadHistory();
   };
   const copyAll = async () => { if (selected) { await navigator.clipboard.writeText(selected.text); setMessage('Transcript copied.'); } };
-  const copySummary = async () => { if (selected?.summary) { await navigator.clipboard.writeText(selected.summary); setMessage('Summary copied.'); } };
+  const copySummary = async () => { if (selected?.summary) { await navigator.clipboard.writeText(selected.summary); setMessage('Meeting minutes copied.'); } };
   const askQuestion = async () => {
     if (!selected || chatSending || !chatDraft.trim()) return;
     const question = chatDraft.trim();
@@ -148,14 +161,17 @@ export default function App() {
             ? 'Audio Transcriber sends audio chunks to OpenAI to transcribe them. Paste an API key to get started — it is saved on this computer only, never uploaded anywhere else.'
             : 'Your key is saved on this computer only. Pasting a new one replaces it.'}</p>
           <label htmlFor="api-key">OpenAI API key
-            <input id="api-key" type="password" autoComplete="off" spellCheck={false} placeholder="sk-…" value={apiKeyDraft} onChange={(e) => setApiKeyDraft(e.target.value)}/>
+            <input id="api-key" type="password" autoComplete="off" spellCheck={false} placeholder="sk-…" value={apiKeyDraft} onChange={(e) => { setApiKeyDraft(e.target.value); setKeyCheck(null); }}/>
           </label>
           <div className="setup-actions">
             <button className="primary" onClick={() => void saveApiKey()} disabled={savingKey || !apiKeyDraft.trim()}>{savingKey ? 'Saving…' : 'Save key'}</button>
-            {!needsKey && <button className="text-button" onClick={() => { setSettingsOpen(false); setApiKeyDraft(''); }}>Close</button>}
+            {/* Testing the saved key needs no draft, so this stays enabled once a key exists. */}
+            <button onClick={() => void testApiKey()} disabled={testingKey || (!apiKeyDraft.trim() && !settings?.hasApiKey)}>{testingKey ? 'Testing…' : 'Test key'}</button>
+            {!needsKey && <button className="text-button" onClick={() => { setSettingsOpen(false); setApiKeyDraft(''); setKeyCheck(null); }}>Close</button>}
           </div>
+          {keyCheck && <p className={keyCheck.ok ? 'notice' : 'error'} role="status">{keyCheck.ok ? '✓ ' : ''}{keyCheck.message}</p>}
           {needsKey && message && <p className="notice" role="status">{message}</p>}
-          {settings && <p className="setup-meta">Transcription · {settings.transcribeModel} — Summaries · {settings.summaryModel}{settings.keySource === 'environment' ? ' — currently using the key from .env' : ''}</p>}
+          {settings && <p className="setup-meta">Transcription · {settings.transcribeModel} — Minutes · {settings.summaryModel}{settings.keySource === 'environment' ? ' — currently using the key from .env' : ''}</p>}
         </div>
       </section>}
 
@@ -167,7 +183,7 @@ export default function App() {
         </label>
         <div className="upload-options"><label>Spoken language<select value={language} onChange={(e) => setLanguage(e.target.value as typeof language)}><option value="auto">Auto-detect</option><option value="indonesian">Indonesian (Bahasa Indonesia)</option></select></label>
           <div className="upload-actions">
-            <label className="toggle"><input type="checkbox" checked={summarize} onChange={(e) => setSummarize(e.target.checked)}/>Summarise when done</label>
+            <label className="toggle"><input type="checkbox" checked={summarize} onChange={(e) => setSummarize(e.target.checked)}/>Write meeting minutes</label>
             <button className="primary" onClick={upload} disabled={!file || uploadProgress !== null}>Transcribe audio <span>→</span></button>
           </div></div>
         {uploadProgress !== null && <div className="progress-wrap"><progress value={uploadProgress} max="100"/><span>{uploadProgress}% uploaded</span><button className="text-button" onClick={() => requestRef.current?.abort()}>Cancel</button></div>}
@@ -185,9 +201,9 @@ export default function App() {
             <div className="editor-header"><input aria-label="Transcript title" value={selected.title} onChange={(e) => setSelected({ ...selected, title: e.target.value })}/><div className="editor-actions"><button onClick={() => void copyAll()}>Copy all</button><a href={`${api}/${selected.id}/download?format=txt`}>TXT</a>{selected.summary && <a href={`${api}/${selected.id}/download?format=md`}>MD</a>}<button className="danger" onClick={() => void remove(selected)}>Delete</button></div></div>
             {selected.error && <p className="error">{selected.error}</p>}
             {selected.summaryError && <p className="error">{selected.summaryError}</p>}
-            {selected.summarize && !selected.summary && !selected.summaryError && selected.status !== 'completed' && <p className="notice-inline">A meeting summary will be written once the transcript finishes.</p>}
-            {selected.summary && <section className="summary-panel" aria-label="Meeting summary">
-              <header><div><p className="section-number">MEETING MINUTES</p><h3>Summary</h3></div><div className="summary-actions"><button onClick={() => void copySummary()}>Copy summary</button><button onClick={() => setSummaryOpen((open) => !open)} aria-expanded={summaryOpen} aria-label={summaryOpen ? 'Hide summary' : 'Show summary'}>{summaryOpen ? 'Hide' : 'Show'}</button></div></header>
+            {selected.summarize && !selected.summary && !selected.summaryError && selected.status !== 'completed' && <p className="notice-inline">Detailed meeting minutes will be written once the transcript finishes.</p>}
+            {selected.summary && <section className="summary-panel" aria-label="Meeting minutes">
+              <header><div><p className="section-number">MEETING MINUTES</p><h3>Meeting minutes</h3></div><div className="summary-actions"><button onClick={() => void copySummary()}>Copy minutes</button><button onClick={() => setSummaryOpen((open) => !open)} aria-expanded={summaryOpen} aria-label={summaryOpen ? 'Hide minutes' : 'Show minutes'}>{summaryOpen ? 'Hide' : 'Show'}</button></div></header>
               {summaryOpen && <div className="summary-body"><ReactMarkdown>{selected.summary}</ReactMarkdown></div>}
             </section>}
             {selected.text.trim() ? <section className="chat-panel" aria-label="Ask about this transcript">

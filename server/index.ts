@@ -10,6 +10,7 @@ import { appDataDirectory } from './paths.js';
 import { DEFAULT_CHAT_MODEL, OpenAIChatAssistant } from './openai-chat.js';
 import { DEFAULT_SUMMARY_MODEL, OpenAISummarizer } from './openai-summarizer.js';
 import { DEFAULT_TRANSCRIBE_MODEL, OpenAITranscriber } from './openai-transcriber.js';
+import { OpenAIKeyVerifier } from './openai-verify.js';
 import { JobProcessor } from './processor.js';
 import { JobQueue } from './queue.js';
 import { SettingsStore } from './settings.js';
@@ -36,9 +37,12 @@ const processor = new JobProcessor(store, {
   summarize: (text) => new OpenAISummarizer(settings.apiKey(), summaryModel).summarize(text),
 });
 const queue = new JobQueue(processor, store);
+const verifier = new OpenAIKeyVerifier(() => [transcribeModel, summaryModel, chatModel]);
 const app = createApp({
   store, uploadDirectory, settings, enqueue: queue.enqueue, cancel: queue.cancel,
   ask: (transcriptText, history, question) => new OpenAIChatAssistant(settings.apiKey(), chatModel).ask(transcriptText, history, question),
+  // An empty field means "test the key already saved".
+  verify: (apiKey) => verifier.verify(apiKey || settings.apiKey() || ''),
 });
 const dist = path.join(root, 'dist');
 if (process.env.NODE_ENV === 'production') { app.use(express.static(dist)); app.get('*path', (_req, res) => res.sendFile(path.join(dist, 'index.html'))); }

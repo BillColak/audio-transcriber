@@ -10,7 +10,7 @@ Download the installer for your platform from the [Releases page](https://github
 
 > **This is a private build, never distributed publicly.** `scripts/prepare-sidecar.mjs` bakes the build machine's own `OPENAI_API_KEY` (from its `.env`) into the packaged app, so a fresh install never shows the "add your key" screen — it just works on any machine the developer installs it on. If this project is ever going to be shared with anyone else, remove that step and rely on the in-app Settings screen (still there, still functional) instead.
 
-Use the **Settings** button in the top right to replace the key later, or to check which key/model is currently active.
+Use the **Settings** button in the top right to replace the key later, or to check which key/model is currently active. **Test key** checks a key before you commit to it: it confirms OpenAI accepts the key and that the account can actually reach the models this app uses. That second check matters — a valid key on an account without access to the configured model would otherwise fail silently, hours later, part-way through a job. Testing never saves anything.
 
 > The macOS build is unsigned, so Gatekeeper quarantines it on first launch. Right-click the app and choose **Open**, or run `xattr -dr com.apple.quarantine "/Applications/Audio Transcriber.app"`.
 
@@ -33,7 +33,8 @@ Building the desktop app also needs [Rust](https://rustup.rs/) plus your platfor
 | --- | --- | --- |
 | `OPENAI_API_KEY` | — | Required unless a key has been saved in the app's Settings screen, which takes precedence. Read fresh for every job, so it can change without a restart. |
 | `OPENAI_TRANSCRIBE_MODEL` | `gpt-transcribe` | Speech-to-text model. |
-| `OPENAI_SUMMARY_MODEL` | `gpt-5-mini` | Chat model used for meeting-minutes summaries. |
+| `OPENAI_SUMMARY_MODEL` | `gpt-5.6-terra` | Model used to write meeting minutes. |
+| `OPENAI_CHAT_MODEL` | `gpt-5.6-terra` | Model used to answer questions about a transcript. |
 
 ## Supported recordings
 
@@ -49,7 +50,9 @@ The practical effect is that the transcript is coarser than it used to be — on
 
 ## Summaries
 
-Tick **Summarise when done** next to the Transcribe button and, once the transcript is finished, the app sends the joined text to `OPENAI_SUMMARY_MODEL` and stores meeting-minutes-style notes (summary, key points, decisions, action items) alongside it. The notes appear in a collapsible **Summary** panel in the editor, with a Copy button and an **MD** download.
+Tick **Write meeting minutes** next to the Transcribe button and, once the transcript is finished, the app sends the joined text to `OPENAI_SUMMARY_MODEL` and stores detailed minutes alongside it: an overview, the discussion broken down by topic, decisions and the reasoning behind them, action items, and open questions. They appear in a collapsible **Meeting minutes** panel in the editor, with a Copy button and an **MD** download.
+
+The transcript is machine-generated and will contain mishearings, so the model is told to work out what was meant from the surrounding context rather than repeat a garbled phrase — and to say a passage is unclear rather than guess.
 
 A summary that fails does not fail the job: the transcript is still saved and marked complete, and the reason is shown above the segments.
 
