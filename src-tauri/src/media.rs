@@ -11,6 +11,20 @@ pub struct PreparedChunk {
 /// Where the FFmpeg binary lives. The packaged app passes the bundled resource path; a dev run
 /// falls back to `AUDIO_TRANSCRIBER_FFMPEG`, then the `ffmpeg-static` package, then `PATH`.
 pub fn resolve_ffmpeg(bundled: Option<&Path>) -> PathBuf {
+    let resolved = locate(bundled);
+    // A bundler can strip the executable bit off a copied resource, which the TypeScript backend
+    // repaired on every run. Without this, macOS and Linux builds fail with "permission denied".
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if resolved.is_file() {
+            let _ = std::fs::set_permissions(&resolved, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+    resolved
+}
+
+fn locate(bundled: Option<&Path>) -> PathBuf {
     if let Ok(from_env) = std::env::var("AUDIO_TRANSCRIBER_FFMPEG") {
         if !from_env.trim().is_empty() {
             return PathBuf::from(from_env);
@@ -21,9 +35,12 @@ pub fn resolve_ffmpeg(bundled: Option<&Path>) -> PathBuf {
             return path.to_path_buf();
         }
     }
-    // Developer convenience: the repo already carries a binary via npm.
+    // Developer convenience: the repo already carries a binary via npm. Resolved against the
+    // manifest directory rather than the working directory, which varies by how you launch.
     let name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
-    let from_node_modules = PathBuf::from("node_modules/ffmpeg-static").join(name);
+    let from_node_modules = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../node_modules/ffmpeg-static")
+        .join(name);
     if from_node_modules.is_file() {
         return from_node_modules;
     }
@@ -79,7 +96,9 @@ impl FfmpegMedia {
             .map_err(|e| format!("Could not run FFmpeg: {e}"))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            let tail: String = stderr.lines().rev().take(4).collect::<Vec<_>>().join(" ");
+            let mut tail: Vec<&str> = stderr.lines().rev().take(4).collect();
+            tail.reverse();
+            let tail = tail.join(" ");
             return Err(format!("FFmpeg could not read the audio. {tail}"));
         }
 
@@ -125,16 +144,24 @@ impl FfmpegMedia {
 
 /// Pulls `Duration: HH:MM:SS.ss` out of an FFmpeg banner.
 pub fn parse_duration(stderr: &str) -> Option<f64> {
-    let start = stderr.find("Duration: ")? + "Duration: ".len();
-    let rest = &stderr[start..];
-    let end = rest.find(',').unwrap_or(rest.len());
-    let stamp = rest[..end].trim();
-
-    let mut parts = stamp.split(':');
-    let hours: f64 = parts.next()?.trim().parse().ok()?;
-    let minutes: f64 = parts.next()?.trim().parse().ok()?;
-    let seconds: f64 = parts.next()?.trim().parse().ok()?;
-    Some(hours * 3600.0 + minutes * 60.0 + seconds)
+    // Every occurrence is tried, not just the first: FFmpeg prints `Duration: N/A` for streams it
+    // cannot measure, and the usable banner can come after one of those.
+    for (index, _) in stderr.match_indices("Duration: ") {
+        let rest = &stderr[index + "Duration: ".len()..];
+        let end = rest.find(',').unwrap_or(rest.len());
+        let stamp = rest[..end].trim();
+        let mut parts = stamp.split(':');
+        let parsed = (|| {
+            let hours: f64 = parts.next()?.trim().parse().ok()?;
+            let minutes: f64 = parts.next()?.trim().parse().ok()?;
+            let seconds: f64 = parts.next()?.trim().parse().ok()?;
+            Some(hours * 3600.0 + minutes * 60.0 + seconds)
+        })();
+        if parsed.is_some() {
+            return parsed;
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -165,6 +192,17 @@ Input #0, mp3, from 'chunk-000.mp3':
     fn returns_nothing_when_ffmpeg_reported_no_duration() {
         assert_eq!(parse_duration("Invalid data found when processing input"), None);
         assert_eq!(parse_duration("Duration: N/A, start: 0.0"), None);
+    }
+
+    #[test]
+    fn skips_an_unmeasurable_stream_and_uses_the_next_banner() {
+        // FFmpeg prints N/A for a stream it cannot measure; the usable one can come afterwards.
+        let stderr = "\
+Input #0, mp3, from 'first':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+Input #1, mp3, from 'second':
+  Duration: 00:10:00.00, start: 0.0, bitrate: 64 kb/s";
+        assert_eq!(parse_duration(stderr).unwrap(), 600.0);
     }
 
     #[test]

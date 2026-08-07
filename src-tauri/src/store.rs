@@ -35,7 +35,12 @@ impl TranscriptStore {
     pub async fn get(&self, id: &str) -> Result<Option<Transcript>, String> {
         let path = self.file(id)?;
         match tokio::fs::read_to_string(&path).await {
-            Ok(raw) => serde_json::from_str(&raw).map(Some).map_err(|e| e.to_string()),
+            Ok(raw) => serde_json::from_str::<Transcript>(&raw)
+                .map(|mut t| {
+                    normalize(&mut t);
+                    Some(t)
+                })
+                .map_err(|e| e.to_string()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error.to_string()),
         }
@@ -57,7 +62,10 @@ impl TranscriptStore {
             // One unreadable record must not take the whole history down with it.
             match tokio::fs::read_to_string(&path).await {
                 Ok(raw) => match serde_json::from_str::<Transcript>(&raw) {
-                    Ok(transcript) => transcripts.push(transcript),
+                    Ok(mut transcript) => {
+                        normalize(&mut transcript);
+                        transcripts.push(transcript);
+                    }
                     Err(error) => log::warn!("skipping unreadable transcript {path:?}: {error}"),
                 },
                 Err(error) => log::warn!("could not read {path:?}: {error}"),
@@ -92,6 +100,24 @@ impl TranscriptStore {
 
     pub fn directory(&self) -> &Path {
         &self.directory
+    }
+}
+
+/// Records written before the flattened `text` field existed carry their content only in
+/// `segments`. The TypeScript backend rebuilt `text` from them on every read; without that, a
+/// transcript made before the chat feature renders blank and cannot be chatted about at all.
+/// Joined with a single space, matching what that backend produced.
+fn normalize(transcript: &mut Transcript) {
+    if transcript.text.trim().is_empty() && !transcript.segments.is_empty() {
+        let joined = transcript
+            .segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !joined.trim().is_empty() {
+            transcript.text = joined;
+        }
     }
 }
 
@@ -184,5 +210,49 @@ mod tests {
         assert_eq!(loaded.title, "Old");
         assert!(loaded.chat_messages.is_empty());
         assert_eq!(loaded.summary, None);
+        // The whole point: a record with no `text` field must still show its content, or five of
+        // the developer's own transcripts render blank and cannot be chatted about.
+        assert_eq!(loaded.text, "hello");
+    }
+
+    #[tokio::test]
+    async fn rebuilds_missing_text_from_several_segments_and_lists_it_too() {
+        let dir = scratch("legacy-multi");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("old.json"),
+            r#"{"id":"old","title":"Old","sourceName":"old.mp3","language":"indonesian",
+                "status":"completed","progress":100,"createdAt":"2026-01-01T00:00:00.000Z",
+                "updatedAt":"2026-01-01T00:00:00.000Z","durationSeconds":6,
+                "segments":[{"id":"0-0","startSeconds":0,"endSeconds":3,"text":"selamat"},
+                            {"id":"1-0","startSeconds":3,"endSeconds":6,"text":"pagi"}],
+                "error":null}"#,
+        )
+        .unwrap();
+
+        let store = TranscriptStore::new(&dir);
+        assert_eq!(store.get("old").await.unwrap().unwrap().text, "selamat pagi");
+        // list() reads by a different path, so it needs the same backfill.
+        assert_eq!(store.list().await.unwrap()[0].text, "selamat pagi");
+    }
+
+    #[tokio::test]
+    async fn does_not_invent_text_for_a_transcript_that_has_none() {
+        let dir = scratch("legacy-empty");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("quiet.json"),
+            r#"{"id":"quiet","title":"Quiet","sourceName":"quiet.mp3","language":"auto",
+                "status":"completed","progress":100,"createdAt":"2026-01-01T00:00:00.000Z",
+                "updatedAt":"2026-01-01T00:00:00.000Z","durationSeconds":5,
+                "segments":[{"id":"0-0","startSeconds":0,"endSeconds":5,"text":""}],
+                "error":null}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            TranscriptStore::new(&dir).get("quiet").await.unwrap().unwrap().text,
+            ""
+        );
     }
 }

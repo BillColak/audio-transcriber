@@ -91,7 +91,10 @@ impl SettingsStore {
 
     pub async fn set_api_key(&self, key: &str) -> Result<(), String> {
         let trimmed = key.trim();
-        if trimmed.len() < MIN_API_KEY_LENGTH {
+        // Counted in characters, not bytes: `str::len()` would let ~10 non-ASCII characters past a
+        // 20-byte check that the TypeScript version (UTF-16 code units) rejected. A saved key wins
+        // over the environment, so junk getting through here silently shadows a working `.env` key.
+        if trimmed.chars().count() < MIN_API_KEY_LENGTH {
             return Err("That does not look like an OpenAI API key.".into());
         }
         tokio::fs::create_dir_all(&self.directory)
@@ -141,6 +144,15 @@ mod tests {
             store.set_api_key("nope").await.unwrap_err(),
             "That does not look like an OpenAI API key."
         );
+    }
+
+    #[tokio::test]
+    async fn measures_key_length_in_characters_not_bytes() {
+        let store = SettingsStore::new(scratch("multibyte"), models());
+        // Ten Cyrillic characters are 20 bytes but only 10 characters — a byte check would let
+        // this through and it would then shadow a working key from the environment.
+        assert!(store.set_api_key("абвгдежзий").await.is_err());
+        assert!(store.set_api_key("設定設定設定設定").await.is_err());
     }
 
     #[tokio::test]
