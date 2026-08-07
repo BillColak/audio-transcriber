@@ -30,6 +30,10 @@ function ffmpegSource() {
 
 mkdirSync(resources, { recursive: true });
 
+// `resources/*` bundles whatever is in this directory, so a leftover from the Node sidecar era
+// would silently add megabytes to every installer.
+rmSync(path.join(resources, 'server.mjs'), { force: true });
+
 const ffmpeg = path.join(resources, `ffmpeg${exe}`);
 copyFileSync(ffmpegSource(), ffmpeg);
 if (!windows) chmodSync(ffmpeg, 0o755);

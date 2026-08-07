@@ -8,11 +8,18 @@ It ships two ways: as a **desktop app** (Windows and macOS, built with Tauri) an
 
 Download the installer for your platform from the [Releases page](https://github.com/BillColak/audio-transcriber/releases), run it, and launch Audio Transcriber from the Start Menu or Applications folder. There is nothing else to install — Node.js and FFmpeg are bundled.
 
-> **This is a private build, never distributed publicly.** `scripts/prepare-sidecar.mjs` bakes the build machine's own `OPENAI_API_KEY` (from its `.env`) into the packaged app, so a fresh install never shows the "add your key" screen — it just works on any machine the developer installs it on. If this project is ever going to be shared with anyone else, remove that step and rely on the in-app Settings screen (still there, still functional) instead.
+> **This is a private build, never distributed publicly.** `scripts/prepare-resources.mjs` bakes the build machine's own `OPENAI_API_KEY` (from its `.env`) into the packaged app, so a fresh install never shows the "add your key" screen — it just works on any machine the developer installs it on. If this project is ever going to be shared with anyone else, remove that step and rely on the in-app Settings screen (still there, still functional) instead.
 
 Use the **Settings** button in the top right to replace the key later, or to check which key/model is currently active. **Test key** checks a key before you commit to it: it confirms OpenAI accepts the key and that the account can actually reach the models this app uses. That second check matters — a valid key on an account without access to the configured model would otherwise fail silently, hours later, part-way through a job. Testing never saves anything.
 
 > The macOS build is unsigned, so Gatekeeper quarantines it on first launch. Right-click the app and choose **Open**, or run `xattr -dr com.apple.quarantine "/Applications/Audio Transcriber.app"`.
+
+## How it works
+
+The interface is React. The backend — uploads, FFmpeg chunking, the OpenAI calls, the job queue and
+the transcript store — is **Rust, compiled into the desktop binary** and served on `127.0.0.1:8787`.
+There is no Node runtime in the installer and no separate server process, which is why it is about
+25 MB rather than 48 MB.
 
 ## Developing
 
@@ -21,9 +28,9 @@ Use the **Settings** button in the top right to replace the key later, or to che
 3. Run `npm install`.
 4. Either:
    - **In a browser** — `npm run dev`, then open `http://127.0.0.1:5173`.
-   - **As the desktop app** — `npm run dev:tauri`, which starts Vite, builds the backend bundle, and opens the native window.
+   - **As the desktop app** — `npm run dev:tauri`, which starts Vite and opens the native window with the backend running inside it.
 
-For a production-style local run in the browser, use `npm run build`, set `NODE_ENV=production`, run `npm start`, and open `http://127.0.0.1:8787`.
+`npm run dev` runs Vite alongside the Rust backend (`cargo run --bin serve`) on `127.0.0.1:8787`. The first run compiles Rust and is slow; later runs are quick.
 
 Building the desktop app also needs [Rust](https://rustup.rs/) plus your platform's C toolchain (MSVC Build Tools with the "Desktop development with C++" workload on Windows, Xcode command line tools on macOS) — see [Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/).
 
@@ -60,7 +67,7 @@ A summary that fails does not fail the job: the transcript is still saved and ma
 
 - The app binds only to `127.0.0.1` and has no accounts or public access.
 - Original uploads and temporary chunks are deleted after completion, failure, or cancellation.
-- Transcripts and the saved API key live in the per-user app data directory: `%APPDATA%\Audio Transcriber` on Windows, `~/Library/Application Support/Audio Transcriber` on macOS. The desktop app and `npm run dev` share that location.
+- Transcripts and the saved API key live in the per-user app data directory: `%APPDATA%\Audio Transcriber` on Windows, `~/Library/Application Support/Audio Transcriber` on macOS. The desktop app and `npm run dev` share that location, so a transcript made in one shows up in the other.
 - Audio chunks are sent to OpenAI for transcription — and, if you ask for one, the transcript text is sent for summarisation. Both incur normal OpenAI API usage charges. Review current pricing and data controls in your OpenAI account.
 
 ## Updates
@@ -89,15 +96,14 @@ git tag v1.0.0 && git push origin v1.0.0
 
 …or trigger it by hand from the repository's **Actions** tab. It builds on `windows-latest` and `macos-latest` in parallel and attaches the installers to a draft GitHub Release. Installers are also uploaded as workflow artifacts, so a manual run is a safe way to get a build without publishing anything.
 
-The workflow deliberately never passes `--target` to Tauri. The sidecar is the build machine's own Node binary, named from `rustc -vV`'s host triple, so cross-compiling would bundle the wrong architecture. Supporting Intel Macs means adding a matrix entry on an Intel runner rather than a cross-compile flag.
+The workflow builds natively on each runner. The backend is compiled into the binary now, so the only architecture-specific payload is FFmpeg — but supporting Intel Macs still means adding a matrix entry on an Intel runner rather than a cross-compile flag.
 
 ## Commands
 
-- `npm run dev` — run the interface and local API in a browser.
+- `npm run dev` — run the interface (Vite) and the Rust backend together, in a browser.
 - `npm run dev:tauri` — run the desktop app against the Vite dev server.
 - `npm test` — run automated tests.
 - `npm run lint` — lint the TypeScript.
 - `npm run build` — type-check and build the interface.
 - `npm run build:tauri` — build the desktop installer for this platform.
-- `npm run tauri:prepare` — regenerate the sidecar payloads on their own (`dev:tauri` and `build:tauri` do this automatically).
-- `npm start` — run the local API and built interface.
+- `npm run tauri:prepare` — copy FFmpeg (and the bundled key, if any) into `src-tauri/resources` (`dev:tauri` and `build:tauri` do this automatically).

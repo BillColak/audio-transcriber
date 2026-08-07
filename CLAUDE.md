@@ -82,6 +82,10 @@ carries only the executable and FFmpeg.
 - **There is no sidecar.** Removing Node also removed the whole class of packaging bugs it brought:
   the `\?\` verbatim-path crash, the esbuild ESM/CJS rules, and the target-triple binary naming.
   `tauri build` no longer cares what architecture the build machine is, except for FFmpeg.
+- The crate has **two binaries**: the Tauri app and `serve` (the dev-only headless backend). Without
+  `default-run` in `Cargo.toml` and `mainBinaryName` in `tauri.conf.json` the bundler picks the wrong
+  one and ships the console server as the app — it builds and signs cleanly, so the only symptom is
+  an installed app that opens no window. Do not remove either setting.
 - Auto-update is `tauri-plugin-updater` reading `latest.json` from the GitHub release feed, offered
   by `src/useUpdate.ts`. Three things are easy to get wrong. The **public key in `tauri.conf.json`
   must match** the private key in CI secrets, or clients silently refuse every update. The feed only
