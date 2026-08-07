@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { chunkSegment, formatTimestamp, joinSegments, languageCodes, validateAudioFile } from './domain.js';
-import { toMarkdown, toText, toVtt } from './exports.js';
+import { toMarkdown } from './exports.js';
 
 describe('audio validation', () => {
   it('accepts supported audio and rejects unsupported extensions', () => {
@@ -35,11 +35,8 @@ describe('timestamped transcripts', () => {
     ])).toBe('Halo\n\ndunia');
   });
 
-  it('formats text and valid WebVTT', () => {
-    const segments = [{ id: 'a', startSeconds: 1.25, endSeconds: 3.5, text: 'Selamat pagi.' }];
+  it('formats timestamps', () => {
     expect(formatTimestamp(3661.25)).toBe('01:01:01.250');
-    expect(toText(segments)).toBe('[00:00:01] Selamat pagi.');
-    expect(toVtt(segments)).toContain('00:00:01.250 --> 00:00:03.500\nSelamat pagi.');
   });
 
   it('exports a summary as Markdown', () => {

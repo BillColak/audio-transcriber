@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import './styles.css';
 
 type Status = 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
 interface Segment { id: string; startSeconds: number; endSeconds: number; text: string }
+interface ChatMessage { id: string; role: 'user' | 'assistant'; content: string; createdAt: string }
 interface Transcript {
   id: string; title: string; sourceName: string; language: 'auto' | 'indonesian'; status: Status; progress: number;
-  createdAt: string; updatedAt: string; durationSeconds: number; segments: Segment[]; error: string | null;
-  summarize: boolean; summary: string | null; summaryError: string | null;
+  createdAt: string; updatedAt: string; durationSeconds: number; segments: Segment[]; text: string; error: string | null;
+  summarize: boolean; summary: string | null; summaryError: string | null; chatMessages: ChatMessage[];
 }
 
 // In a browser the Vite dev server (or Express itself) proxies `/api`. Inside the Tauri webview the
@@ -25,6 +27,7 @@ export default function App() {
   const [language, setLanguage] = useState<'auto' | 'indonesian'>('auto');
   const [summarize, setSummarize] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(true);
+  const [transcriptOpen, setTranscriptOpen] = useState(true);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [message, setMessage] = useState('');
   const [dragging, setDragging] = useState(false);
@@ -32,7 +35,17 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [savingKey, setSavingKey] = useState(false);
+  const [chatDraft, setChatDraft] = useState('');
+  const [chatSending, setChatSending] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
+  const [chatSelectedId, setChatSelectedId] = useState<string | null>(null);
   const requestRef = useRef<XMLHttpRequest | null>(null);
+
+  if ((selected?.id ?? null) !== chatSelectedId) {
+    setChatSelectedId(selected?.id ?? null);
+    setChatDraft(''); setChatError(null); setPendingQuestion(null);
+  }
 
   const loadHistory = async (quiet = false) => {
     try {
@@ -98,15 +111,29 @@ export default function App() {
 
   const save = async () => {
     if (!selected) return;
-    const response = await fetch(`${api}/${selected.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: selected.title, segments: selected.segments }) });
+    const response = await fetch(`${api}/${selected.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: selected.title, text: selected.text }) });
     setMessage(response.ok ? 'Changes saved.' : 'Could not save changes.'); if (response.ok) void loadHistory();
   };
   const remove = async (item: Transcript) => {
     if (!window.confirm(item.status === 'processing' ? 'Cancel this transcription?' : 'Delete this transcript?')) return;
     await fetch(`${api}/${item.id}`, { method: 'DELETE' }); if (selected?.id === item.id) setSelected(null); void loadHistory();
   };
-  const copyAll = async () => { if (selected) { await navigator.clipboard.writeText(selected.segments.map((s) => s.text).join(' ')); setMessage('Transcript copied.'); } };
+  const copyAll = async () => { if (selected) { await navigator.clipboard.writeText(selected.text); setMessage('Transcript copied.'); } };
   const copySummary = async () => { if (selected?.summary) { await navigator.clipboard.writeText(selected.summary); setMessage('Summary copied.'); } };
+  const askQuestion = async () => {
+    if (!selected || chatSending || !chatDraft.trim()) return;
+    const question = chatDraft.trim();
+    setChatSending(true); setPendingQuestion(question); setChatError(null);
+    try {
+      const response = await fetch(`${api}/${selected.id}/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }) });
+      const body = await response.json() as Transcript & { error?: string };
+      if (!response.ok) { setChatError(body.error ?? 'The question could not be answered.'); return; }
+      setHistory((items) => items.map((item) => item.id === body.id ? body : item));
+      setSelected((current) => current?.id === body.id ? body : current);
+      setChatDraft('');
+    } catch { setChatError('Could not reach the local transcription server.'); }
+    finally { setChatSending(false); setPendingQuestion(null); }
+  };
   const active = useMemo(() => history.filter((item) => item.status === 'queued' || item.status === 'processing'), [history]);
   const needsKey = settings !== null && !settings.hasApiKey;
 
@@ -155,16 +182,42 @@ export default function App() {
         </aside>
         <section className="editor" aria-label="Transcript editor">
           {!selected ? <div className="editor-empty"><span>⌁</span><h3>Select a transcript</h3><p>Choose an item from history to review, edit, copy, or export it.</p></div> : <>
-            <div className="editor-header"><input aria-label="Transcript title" value={selected.title} onChange={(e) => setSelected({ ...selected, title: e.target.value })}/><div className="editor-actions"><button onClick={() => void copyAll()}>Copy all</button><a href={`${api}/${selected.id}/download?format=txt`}>TXT</a><a href={`${api}/${selected.id}/download?format=vtt`}>VTT</a>{selected.summary && <a href={`${api}/${selected.id}/download?format=md`}>MD</a>}<button className="danger" onClick={() => void remove(selected)}>Delete</button></div></div>
+            <div className="editor-header"><input aria-label="Transcript title" value={selected.title} onChange={(e) => setSelected({ ...selected, title: e.target.value })}/><div className="editor-actions"><button onClick={() => void copyAll()}>Copy all</button><a href={`${api}/${selected.id}/download?format=txt`}>TXT</a>{selected.summary && <a href={`${api}/${selected.id}/download?format=md`}>MD</a>}<button className="danger" onClick={() => void remove(selected)}>Delete</button></div></div>
             {selected.error && <p className="error">{selected.error}</p>}
             {selected.summaryError && <p className="error">{selected.summaryError}</p>}
             {selected.summarize && !selected.summary && !selected.summaryError && selected.status !== 'completed' && <p className="notice-inline">A meeting summary will be written once the transcript finishes.</p>}
             {selected.summary && <section className="summary-panel" aria-label="Meeting summary">
-              <header><div><p className="section-number">MEETING MINUTES</p><h3>Summary</h3></div><div className="summary-actions"><button onClick={() => void copySummary()}>Copy summary</button><button onClick={() => setSummaryOpen((open) => !open)} aria-expanded={summaryOpen}>{summaryOpen ? 'Hide' : 'Show'}</button></div></header>
-              {summaryOpen && <div className="summary-body">{selected.summary}</div>}
+              <header><div><p className="section-number">MEETING MINUTES</p><h3>Summary</h3></div><div className="summary-actions"><button onClick={() => void copySummary()}>Copy summary</button><button onClick={() => setSummaryOpen((open) => !open)} aria-expanded={summaryOpen} aria-label={summaryOpen ? 'Hide summary' : 'Show summary'}>{summaryOpen ? 'Hide' : 'Show'}</button></div></header>
+              {summaryOpen && <div className="summary-body"><ReactMarkdown>{selected.summary}</ReactMarkdown></div>}
             </section>}
-            <div className="segments">{selected.segments.map((segment, index) => <div className="segment" key={segment.id}><time>{clock(segment.startSeconds)}</time><span>{String(index + 1).padStart(2, '0')}</span><textarea aria-label={`Transcript segment ${index + 1}`} value={segment.text} rows={Math.max(2, Math.ceil(segment.text.length / 75))} onChange={(e) => setSelected({ ...selected, segments: selected.segments.map((item) => item.id === segment.id ? { ...item, text: e.target.value } : item) })}/></div>)}</div>
-            <div className="save-bar"><span>{selected.segments.length} timestamped segments · {duration(selected.durationSeconds)}</span><button className="primary" onClick={() => void save()}>Save changes</button></div>
+            {selected.text.trim() ? <section className="chat-panel" aria-label="Ask about this transcript">
+              <header><p className="section-number">ASK</p><h3>Ask about this transcript</h3></header>
+              <div className="chat-messages">
+                {selected.chatMessages.length === 0 && !pendingQuestion && <p className="notice-inline">Ask a question about what was said.</p>}
+                {selected.chatMessages.map((msg) => <div className={`chat-message ${msg.role}`} key={msg.id}>
+                  <strong>{msg.role === 'user' ? 'You' : 'Assistant'}</strong>
+                  {msg.role === 'assistant' ? <ReactMarkdown>{msg.content}</ReactMarkdown> : <p>{msg.content}</p>}
+                </div>)}
+                {pendingQuestion && <>
+                  <div className="chat-message user"><strong>You</strong><p>{pendingQuestion}</p></div>
+                  <div className="chat-message assistant"><strong>Assistant</strong><p className="notice-inline">Thinking…</p></div>
+                </>}
+              </div>
+              {chatError && <p className="error">{chatError}</p>}
+              <div className="chat-input">
+                <input aria-label="Ask a question" placeholder="What did they decide about…" value={chatDraft}
+                  onChange={(e) => setChatDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void askQuestion(); } }}/>
+                <button className="primary" onClick={() => void askQuestion()} disabled={chatSending || !chatDraft.trim()}>{chatSending ? 'Asking…' : 'Ask'}</button>
+              </div>
+            </section> : <p className="notice-inline">Nothing to chat about yet.</p>}
+            <section className="transcript-editor" aria-label="Full transcript editor">
+              <header><div><p className="section-number">TRANSCRIPT</p><h3>Transcript</h3></div><div className="transcript-actions"><button onClick={() => setTranscriptOpen((open) => !open)} aria-expanded={transcriptOpen} aria-label={transcriptOpen ? 'Hide transcript' : 'Show transcript'}>{transcriptOpen ? 'Hide' : 'Show'}</button></div></header>
+              {transcriptOpen && <div className="transcript-body">
+                <textarea id="transcript-text" aria-label="Full transcript" value={selected.text} rows={Math.max(10, Math.ceil(selected.text.length / 80))} onChange={(e) => setSelected({ ...selected, text: e.target.value })}/>
+              </div>}
+            </section>
+            <div className="save-bar"><span>{duration(selected.durationSeconds)}</span><button className="primary" onClick={() => void save()}>Save changes</button></div>
           </>}
         </section>
       </section>

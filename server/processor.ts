@@ -34,7 +34,7 @@ export class JobProcessor {
         segments.push(chunkSegment(chunk.text, offset, chunks[index].durationSeconds, index));
         offset += chunks[index].durationSeconds;
         transcript.progress = Math.round(10 + ((index + 1) / chunks.length) * (transcript.summarize ? 80 : 88));
-        transcript.segments = segments; transcript.durationSeconds = offset; transcript.updatedAt = new Date().toISOString();
+        transcript.segments = segments; transcript.text = joinSegments(segments); transcript.durationSeconds = offset; transcript.updatedAt = new Date().toISOString();
         await this.store.save(transcript);
       }
       if (transcript.summarize) {

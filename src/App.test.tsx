@@ -7,8 +7,8 @@ afterEach(() => vi.restoreAllMocks());
 const saved = {
   id: 'one', title: 'Rapat', sourceName: 'rapat.mp3', language: 'indonesian', status: 'completed', progress: 100,
   createdAt: '2026-07-13T00:00:00.000Z', updatedAt: '2026-07-13T00:00:00.000Z', durationSeconds: 3,
-  segments: [{ id: '0-0', startSeconds: 1, endSeconds: 3, text: 'Selamat pagi' }], error: null,
-  summarize: false, summary: null, summaryError: null,
+  segments: [{ id: '0-0', startSeconds: 1, endSeconds: 3, text: 'Selamat pagi' }], text: 'Selamat pagi', error: null,
+  summarize: false, summary: null, summaryError: null, chatMessages: [],
 };
 
 const configured = { hasApiKey: true, keySource: 'settings', transcribeModel: 'gpt-transcribe', summaryModel: 'gpt-5-mini' };
@@ -17,15 +17,18 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-interface ApiMock { history?: unknown[]; settings?: unknown; onPut?: (body: string) => Response }
+interface ApiMock { history?: unknown[]; settings?: unknown; onPut?: (body: string) => Response; onChat?: (body: string) => Response }
 
-/** The app calls both /api/transcriptions and /api/settings, so the mock has to route. */
-function mockApi({ history = [], settings = configured, onPut }: ApiMock = {}) {
+/** The app calls /api/transcriptions, /api/settings, and per-transcript /chat, so the mock has to route. */
+function mockApi({ history = [], settings = configured, onPut, onChat }: ApiMock = {}) {
   const put = onPut ?? (() => json(settings));
   return vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
     const url = String(input);
     if (url.endsWith('/api/settings')) {
       return Promise.resolve(init?.method === 'PUT' ? put(String(init.body)) : json(settings));
+    }
+    if (url.endsWith('/chat')) {
+      return Promise.resolve((onChat ?? (() => json({ error: 'chat not mocked' }, 500)))(String(init?.body ?? '')));
     }
     return Promise.resolve(json(history));
   });
@@ -40,7 +43,6 @@ it('offers Indonesian upload and renders a saved timestamped transcript', async 
   expect(await screen.findByRole('button', { name: /Rapat/ })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: /Rapat/ }));
   await waitFor(() => expect(screen.getByDisplayValue('Selamat pagi')).toBeInTheDocument());
-  expect(screen.getByText('00:00:01')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument();
 });
 
@@ -63,7 +65,7 @@ it('shows the generated summary with a copy affordance', async () => {
   fireEvent.click(await screen.findByRole('button', { name: /Rapat/ }));
   await waitFor(() => expect(screen.getByText(/Semua berjalan baik\./)).toBeInTheDocument());
   expect(screen.getByRole('button', { name: 'Copy summary' })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Hide summary' }));
   expect(screen.queryByText(/Semua berjalan baik\./)).not.toBeInTheDocument();
 });
 
@@ -105,4 +107,49 @@ it('lets a configured user reopen settings to replace the key', async () => {
   expect(screen.getByText(/gpt-transcribe/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Close' }));
   expect(screen.queryByRole('heading', { name: 'Settings' })).not.toBeInTheDocument();
+});
+
+it('shows the chat panel for a transcript with text and answers a question', async () => {
+  const answered = { ...saved, chatMessages: [
+    { id: 'q1', role: 'user', content: 'What was discussed?', createdAt: '2026-07-13T00:00:00.000Z' },
+    { id: 'a1', role: 'assistant', content: 'The budget.', createdAt: '2026-07-13T00:00:00.000Z' },
+  ] };
+  const onChat = vi.fn(() => json(answered));
+  mockApi({ history: [saved], onChat });
+
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole('button', { name: /Rapat/ }));
+  const input = await screen.findByLabelText('Ask a question');
+  fireEvent.change(input, { target: { value: 'What was discussed?' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
+
+  expect(screen.getByText('Thinking…')).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByText('The budget.')).toBeInTheDocument());
+  expect(onChat).toHaveBeenCalledWith(JSON.stringify({ question: 'What was discussed?' }));
+});
+
+it('shows a placeholder instead of the chat panel when there is no transcript text yet', async () => {
+  mockApi({ history: [{ ...saved, text: '', segments: [] }] });
+
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole('button', { name: /Rapat/ }));
+  await waitFor(() => expect(screen.getByText('Nothing to chat about yet.')).toBeInTheDocument());
+  expect(screen.queryByLabelText('Ask a question')).not.toBeInTheDocument();
+});
+
+it('lets the full transcript be hidden to reduce clutter', async () => {
+  mockApi({ history: [saved] });
+
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole('button', { name: /Rapat/ }));
+  await waitFor(() => expect(screen.getByLabelText('Full transcript')).toBeInTheDocument());
+
+  fireEvent.click(screen.getByRole('button', { name: 'Hide transcript' }));
+  expect(screen.queryByLabelText('Full transcript')).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Show transcript' }));
+  expect(screen.getByLabelText('Full transcript')).toBeInTheDocument();
 });

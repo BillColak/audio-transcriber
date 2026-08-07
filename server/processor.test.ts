@@ -17,8 +17,8 @@ async function scaffold(overrides: Partial<Transcript> = {}) {
   const store = new TranscriptStore(path.join(dir, 'data'));
   await store.save({
     id: 'job', title: 'Rapat', sourceName: 'rapat.mp3', language: 'indonesian', status: 'queued', progress: 0,
-    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), durationSeconds: 0, segments: [],
-    error: null, summarize: false, summary: null, summaryError: null, ...overrides,
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), durationSeconds: 0, segments: [], text: '',
+    error: null, summarize: false, summary: null, summaryError: null, chatMessages: [], ...overrides,
   });
   return { store, upload };
 }

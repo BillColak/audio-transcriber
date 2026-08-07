@@ -15,8 +15,8 @@ describe('TranscriptStore', () => {
     const store = new TranscriptStore(dir);
     const transcript: Transcript = {
       id: 'one', title: 'Rapat', sourceName: 'rapat.mp3', language: 'indonesian', status: 'processing', progress: 35,
-      createdAt: '2026-07-13T00:00:00.000Z', updatedAt: '2026-07-13T00:00:00.000Z', durationSeconds: 0, segments: [], error: null,
-      summarize: false, summary: null, summaryError: null,
+      createdAt: '2026-07-13T00:00:00.000Z', updatedAt: '2026-07-13T00:00:00.000Z', durationSeconds: 0, segments: [], text: '', error: null,
+      summarize: false, summary: null, summaryError: null, chatMessages: [],
     };
     await store.save(transcript);
     await store.recoverInterrupted();
@@ -34,7 +34,7 @@ describe('TranscriptStore', () => {
     };
     await writeFile(path.join(dir, 'old.json'), JSON.stringify(legacy), 'utf8');
 
-    expect(await store.get('old')).toMatchObject({ summarize: false, summary: null, summaryError: null });
-    expect((await store.list())[0]).toMatchObject({ summarize: false, summary: null, summaryError: null });
+    expect(await store.get('old')).toMatchObject({ summarize: false, summary: null, summaryError: null, chatMessages: [] });
+    expect((await store.list())[0]).toMatchObject({ summarize: false, summary: null, summaryError: null, chatMessages: [] });
   });
 });

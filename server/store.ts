@@ -47,8 +47,10 @@ export class TranscriptStore {
 function normalize(transcript: Transcript): Transcript {
   return {
     ...transcript,
+    text: transcript.text ?? transcript.segments.map((s) => s.text).join(' '),
     summarize: transcript.summarize ?? false,
     summary: transcript.summary ?? null,
     summaryError: transcript.summaryError ?? null,
+    chatMessages: transcript.chatMessages ?? [],
   };
 }

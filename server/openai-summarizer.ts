@@ -16,6 +16,11 @@ const instructions = [
   'The transcript is machine-generated and may contain mishearings; summarise the intent, do not quote errors.',
 ].join('\n');
 
+// understandable language
+// better model
+// capable of handling long transcripts and wrong transcriptions by contextualizing and inferring intent.
+//ato updates on app lunch --> github action / release
+
 export class OpenAISummarizer {
   constructor(private readonly apiKey: string | undefined, private readonly model: string = DEFAULT_SUMMARY_MODEL) {}
 
