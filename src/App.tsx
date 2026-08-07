@@ -227,6 +227,5 @@ export default function App() {
 }
 
 function readError(body: string): string { try { return (JSON.parse(body) as { error?: string }).error ?? 'Upload failed.'; } catch { return 'Upload failed.'; } }
-function clock(seconds: number): string { const h = Math.floor(seconds / 3600); const m = Math.floor((seconds % 3600) / 60); const s = Math.floor(seconds % 60); return [h, m, s].map((v) => String(v).padStart(2, '0')).join(':'); }
 function duration(seconds: number): string { const minutes = Math.floor(seconds / 60); return `${minutes}m ${Math.round(seconds % 60)}s`; }
 function formatBytes(bytes: number): string { return bytes > 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`; }

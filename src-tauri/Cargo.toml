@@ -1,6 +1,6 @@
 [package]
 name = "audio-transcriber"
-version = "1.0.0"
+version = "1.0.1"
 description = "Private, local audio transcription and meeting minutes"
 authors = ["Bill Colak"]
 license = ""

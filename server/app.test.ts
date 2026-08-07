@@ -146,6 +146,26 @@ describe('chat API', () => {
     expect((await store.get('saved'))?.chatMessages).toHaveLength(2);
   });
 
+  it('keeps a transcript edit made while the model was still answering', async () => {
+    const { dir, store, settings } = await withTranscript();
+    // Stands in for the user editing the transcript during the seconds the model takes.
+    const ask = vi.fn(async () => {
+      const edited = (await store.get('saved'))!;
+      edited.title = 'Rapat mingguan';
+      edited.text = 'Halo, apa kabar';
+      await store.save(edited);
+      return 'They discussed the budget.';
+    });
+    const app = createApp({ store, settings, uploadDirectory: path.join(dir, 'uploads'), enqueue: () => undefined, cancel: () => false, ask });
+
+    await request(app).post('/api/transcriptions/saved/chat').send({ question: 'What did they discuss?' }).expect(200);
+
+    const saved = (await store.get('saved'))!;
+    expect(saved.title).toBe('Rapat mingguan');
+    expect(saved.text).toBe('Halo, apa kabar');
+    expect(saved.chatMessages).toHaveLength(2);
+  });
+
   it('maps an upstream failure to a 502 with a humanized message', async () => {
     const { dir, store, settings } = await withTranscript();
     const ask = vi.fn().mockRejectedValue(new Error('401 authentication failed'));

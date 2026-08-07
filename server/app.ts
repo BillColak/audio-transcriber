@@ -91,15 +91,19 @@ export function createApp(options: AppOptions) {
     if (!transcriptText) return res.status(400).json({ error: 'There is no transcript text to chat about yet.' });
     try {
       const answer = await options.ask(transcriptText, transcript.chatMessages, question);
+      // Answering takes seconds, and the record may have been edited in the meantime. Re-read it
+      // so the reply appends to whatever is current instead of restoring the copy read above.
+      const current = await options.store.get(req.params.id);
+      if (!current) return res.status(404).json({ error: 'Transcript not found.' });
       const now = new Date().toISOString();
-      transcript.chatMessages = [
-        ...transcript.chatMessages,
+      current.chatMessages = [
+        ...current.chatMessages,
         { id: randomUUID(), role: 'user', content: question, createdAt: now },
         { id: randomUUID(), role: 'assistant', content: answer, createdAt: now },
       ];
-      transcript.updatedAt = now;
-      await options.store.save(transcript);
-      res.json(transcript);
+      current.updatedAt = now;
+      await options.store.save(current);
+      res.json(current);
     } catch (error) {
       res.status(502).json({ error: humanizeChatError(error) });
     }
