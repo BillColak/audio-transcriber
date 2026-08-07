@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Audio Transcriber",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "identifier": "ai.trackpoint.audio-transcriber",
   "build": {
     "frontendDist": "../dist",
@@ -40,13 +40,22 @@
     ],
     "externalBin": ["binaries/server"],
     "resources": ["resources/*"],
+    "createUpdaterArtifacts": true,
     "windows": {
       "nsis": {
-        "installMode": "perMachine"
+        "installMode": "currentUser"
       }
     },
     "macOS": {
       "minimumSystemVersion": "10.15"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ2N0UwNjg5RjI1MDRCMwpSV1N6QkNXZmFPQm5CUFdTNFZYZUlZUlVsTjlvZ2Y3TlhhZnJHVU5yb21GcWRaSnBjQ2JIWWYrbAo=",
+      "endpoints": [
+        "https://github.com/BillColak/audio-transcriber/releases/latest/download/latest.json"
+      ]
     }
   }
 }

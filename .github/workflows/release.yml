@@ -52,14 +52,23 @@ jobs:
       # binary as the sidecar and names it from `rustc -vV`'s host triple, so a cross-compile
       # would bundle the wrong architecture under the wrong filename. Build natively, and add a
       # matrix entry on a matching runner for any architecture you want to support.
+      # The signing keys are what let an installed app trust an update. Without them the build
+      # still succeeds but emits no signatures, and every client silently refuses to update.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          includeUpdaterJson: true
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}-{1}', github.run_number, github.sha) }}
           releaseName: Audio Transcriber ${{ github.ref_type == 'tag' && github.ref_name || github.run_number }}
           releaseBody: |
             Install and launch Audio Transcriber, then paste an OpenAI API key when it asks.
+            **Test key** in Settings confirms the key works before you rely on it.
+
+            From this version on, the app checks for updates on launch and offers them —
+            you only have to install by hand this once.
 
             The macOS build is unsigned. Gatekeeper will quarantine it on first launch:
             right-click the app and choose Open, or run
